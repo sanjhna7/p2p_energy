@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS meter_readings(
     load_kw REAL
 );
 
+-- One reading per house per timestamp, so re-running the import
+-- cannot duplicate rows.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_meter_readings_unique
+    ON meter_readings(timestamp, house_id);
+
 CREATE TABLE IF NOT EXISTS grid_state(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT,

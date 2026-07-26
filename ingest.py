@@ -73,33 +73,66 @@ def ingest_data():
 
     pivot["house_id"] = pivot["house_id"].astype(str)
 
+    # Installed PV capacity per house, taken from the CSV instead of
+    # being hardcoded. Each customer carries one capacity value.
+    capacity_by_house = df.groupby("Customer")["Generator Capacity"].max()
+    capacity_by_house.index = capacity_by_house.index.astype(str)
+
     conn = get_connection()
 
     for hid in pivot["house_id"].unique():
 
+        capacity = capacity_by_house.get(hid)
+
+        if capacity is None or pd.isna(capacity):
+            capacity = 0.0
+
+        capacity = float(capacity)
+
+        has_solar = 1 if capacity > 0 else 0
+
         conn.execute(
-            "INSERT OR IGNORE INTO houses VALUES (?,?,?,?)",
+            """
+            INSERT INTO houses
+            (house_id, bus_id, has_solar, panel_capacity_kw)
+            VALUES (?,?,?,?)
+            ON CONFLICT(house_id) DO UPDATE SET
+                has_solar = excluded.has_solar,
+                panel_capacity_kw = excluded.panel_capacity_kw
+            """,
             (
                 hid,
                 f"bus_{hid}",
-                1,
-                0
+                has_solar,
+                capacity
             )
         )
 
-    pivot[
+    # Same text format the timestamps were previously stored in,
+    # so existing rows are recognised as duplicates.
+    pivot["timestamp"] = pivot["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = pivot[
         [
             "timestamp",
             "house_id",
             "solar_kw",
             "load_kw"
         ]
-    ].to_sql(
-        "meter_readings",
-        conn,
-        if_exists="append",
-        index=False
+    ].itertuples(index=False, name=None)
+
+    before = conn.total_changes
+
+    conn.executemany(
+        """
+        INSERT OR IGNORE INTO meter_readings
+        (timestamp, house_id, solar_kw, load_kw)
+        VALUES (?,?,?,?)
+        """,
+        rows
     )
+
+    inserted = conn.total_changes - before
 
     conn.commit()
     conn.close()
@@ -107,6 +140,7 @@ def ingest_data():
     print("--------------------------------")
     print("CSV Imported Successfully")
     print(f"Total Meter Readings : {len(pivot)}")
+    print(f"New Readings Inserted : {inserted}")
     print(f"Total Houses : {pivot['house_id'].nunique()}")
 
 
