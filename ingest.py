@@ -1,5 +1,5 @@
 import pandas as pd
-from database import get_connection
+from database import get_connection, METER_INTERVAL_HOURS
 
 CSV_FILE = "Solar home 2010-2011.csv"
 
@@ -73,8 +73,25 @@ def ingest_data():
 
     pivot["house_id"] = pivot["house_id"].astype(str)
 
+    # UNITS: the Ausgrid CSV records ENERGY, not power - every interval
+    # value is the kWh consumed/generated during that half hour (see
+    # "Ausgrid solar home electricity data notes (Aug 2014).pdf",
+    # columns 6-53). The rest of the system works in average POWER, so
+    # convert once, here:
+    #
+    #     average_kW = kWh_in_interval / interval_hours
+    #
+    # i.e. a 0.5 h interval means multiplying by 2. Doing it at ingest
+    # is what keeps meter_readings.solar_kw / load_kw honest to their
+    # names: everything downstream (battery_model, grid_model) then
+    # reads real kW and applies its own dt_hours for energy, with no
+    # second interval factor sneaking in.
+    pivot["solar_kw"] = pivot["solar_kw"] / METER_INTERVAL_HOURS
+    pivot["load_kw"] = pivot["load_kw"] / METER_INTERVAL_HOURS
+
     # Installed PV capacity per house, taken from the CSV instead of
     # being hardcoded. Each customer carries one capacity value.
+    # Already in kW (the CSV records kWp, peak power), so no conversion.
     capacity_by_house = df.groupby("Customer")["Generator Capacity"].max()
     capacity_by_house.index = capacity_by_house.index.astype(str)
 

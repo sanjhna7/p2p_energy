@@ -8,6 +8,11 @@ def get_state(timestamp):
     solar/load (from meter_readings), battery SoC (from battery_state,
     if already computed for this timestamp), and net/status.
 
+    `net_kw` and `status` are POST-battery: they describe the power the
+    house exchanges with the grid after charging/discharging, which is
+    the true environment an agent observes. The pre-battery meter
+    difference is still available as `gross_net_kw`.
+
     Bus-level grid state (voltage, transformer loading, losses) is
     attached separately via `bus_id` lookups against grid_state.
 
@@ -29,7 +34,8 @@ def get_state(timestamp):
             COALESCE(m.load_kw,0) AS load_kw,
             b.soc_kwh,
             b.soc_pct,
-            b.charge_kw
+            b.charge_kw,
+            b.residual_kw
 
         FROM houses h
 
@@ -58,10 +64,22 @@ def get_state(timestamp):
 
         house = dict(row)
 
-        house["net_kw"] = round(
-            house["solar_kw"] - house["load_kw"],
-            3
-        )
+        # Raw meter difference, before the battery does anything.
+        gross_net_kw = house["solar_kw"] - house["load_kw"]
+        house["gross_net_kw"] = round(gross_net_kw, 3)
+
+        # What the house actually exchanges with the grid once the
+        # battery has charged/discharged - this is the observable an
+        # agent must act on, so it is what `net_kw` and `status` report.
+        # A missing residual means nothing buffered the flow (no battery
+        # installed, or this timestamp has not been simulated yet), and
+        # in both cases the residual is simply the gross figure.
+        residual_kw = house.pop("residual_kw")
+
+        if residual_kw is None:
+            residual_kw = gross_net_kw
+
+        house["net_kw"] = round(residual_kw, 3)
 
         if house["net_kw"] > 0:
             house["status"] = "surplus"

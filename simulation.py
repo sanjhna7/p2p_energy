@@ -65,8 +65,15 @@ def simulate_step(timestamp):
                 max_discharge_kw=max_discharge_kw or capacity_kwh,
             )
 
-            battery_rows.append((timestamp, house_id, result.soc_kwh, result.soc_pct, result.charge_kw))
             residual_kw = result.residual_kw
+
+            # residual_kw is stored, not just handed to grid_model: it is
+            # the power this house actually exchanges with the grid, so
+            # it is what state.py must report to an agent.
+            battery_rows.append((
+                timestamp, house_id,
+                result.soc_kwh, result.soc_pct, result.charge_kw, residual_kw,
+            ))
         else:
             residual_kw = net_kw
 
@@ -75,8 +82,8 @@ def simulate_step(timestamp):
 
     conn.executemany("""
         INSERT OR REPLACE INTO battery_state
-        (timestamp, house_id, soc_kwh, soc_pct, charge_kw)
-        VALUES (?,?,?,?,?)
+        (timestamp, house_id, soc_kwh, soc_pct, charge_kw, residual_kw)
+        VALUES (?,?,?,?,?,?)
     """, battery_rows)
 
     grid_rows = []
