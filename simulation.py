@@ -30,9 +30,33 @@ def _previous_battery_soc(conn, house_id, timestamp):
     return row[0] if row else 0.0
 
 
-def simulate_step(timestamp):
+def simulate_step(timestamp, episode_id=None, step=0):
+    """
+    Run one physics step and log it as an RL transition (s, a, r, s').
+
+    episode_id / step let a caller stitch multiple calls into a single
+    trajectory (e.g. a training loop iterating over timestamps for one
+    episode). If episode_id is omitted, a fresh one is generated - fine
+    for a standalone step, but a real multi-step episode should
+    generate one episode_id up front and pass it in on every call,
+    incrementing step each time. Returns episode_id so the caller can
+    reuse it on the next call.
+    """
+
+    if episode_id is None:
+        episode_id = str(uuid.uuid4())
 
     conn = get_connection()
+
+    # PRE-action state: captured before this step's battery_state/
+    # grid_state rows are written, so get_state() falls back to gross
+    # meter figures (no battery result yet, no bus voltage yet) - this
+    # is what was actually observed before acting, i.e. `state` in
+    # (s, a, r, s'). NOTE: if this timestamp was already simulated in a
+    # previous run, this will reflect that prior run's result rather
+    # than a true "before" - fine for the normal forward-simulation
+    # case, worth knowing if you ever re-run a timestamp.
+    pre_state = get_state(timestamp)
 
     houses = conn.execute("""
         SELECT house_id, bus_id, has_battery, battery_capacity_kwh,
@@ -103,34 +127,34 @@ def simulate_step(timestamp):
     """, grid_rows)
 
     conn.commit()
-    conn.close()
 
-    # Now the full state (solar/load/battery/voltage) can be read back
-    # through the normal data-layer API for whatever consumes it next
-    # (RL agent placeholder for now).
-    state = get_state(timestamp)
+    # POST-action state: battery_state/grid_state rows now exist for
+    # this timestamp, so get_state() returns the actual post-step
+    # observation - this is `next_state` in (s, a, r, s').
+    next_state = get_state(timestamp)
 
-    episode_id = str(uuid.uuid4())
     action = {"house_1": "export_surplus"}  # RL agent placeholder
     reward = 0.5                             # RL agent placeholder
 
-    conn = get_connection()
     conn.execute("""
         INSERT INTO transitions
         VALUES (?, ?, ?, ?, ?, ?)
     """, (
         episode_id,
-        0,
-        str(state),
+        step,
+        str(pre_state),
         str(action),
         reward,
-        str(state),
+        str(next_state),
     ))
     conn.commit()
     conn.close()
 
     print(f"Step complete for {timestamp}: "
-          f"{len(battery_rows)} batteries, {len(grid_rows)} buses updated.")
+          f"{len(battery_rows)} batteries, {len(grid_rows)} buses updated. "
+          f"(episode={episode_id}, step={step})")
+
+    return episode_id
 
 
 if __name__ == "__main__":

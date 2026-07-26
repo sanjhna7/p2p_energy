@@ -15,3 +15,6 @@ venv/
 # OS Files
 .DS_Store
 Thumbs.db
+
+#Database check
+che_dbb.py
