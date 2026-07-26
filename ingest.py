@@ -91,20 +91,39 @@ def ingest_data():
 
         has_solar = 1 if capacity > 0 else 0
 
+        # NOTE: the Ausgrid CSV has no battery data at all. These are
+        # simulation-baseline assumptions (only solar houses get a
+        # battery, sized off panel capacity), not measured values.
+        # Tune/replace once real battery specs are available.
+        has_battery = has_solar
+        battery_capacity_kwh = round(capacity * 2, 2) if has_battery else 0.0
+        battery_max_charge_kw = round(capacity, 2) if has_battery else 0.0
+        battery_max_discharge_kw = round(capacity, 2) if has_battery else 0.0
+
         conn.execute(
             """
             INSERT INTO houses
-            (house_id, bus_id, has_solar, panel_capacity_kw)
-            VALUES (?,?,?,?)
+            (house_id, bus_id, has_solar, panel_capacity_kw,
+             has_battery, battery_capacity_kwh,
+             battery_max_charge_kw, battery_max_discharge_kw)
+            VALUES (?,?,?,?,?,?,?,?)
             ON CONFLICT(house_id) DO UPDATE SET
                 has_solar = excluded.has_solar,
-                panel_capacity_kw = excluded.panel_capacity_kw
+                panel_capacity_kw = excluded.panel_capacity_kw,
+                has_battery = excluded.has_battery,
+                battery_capacity_kwh = excluded.battery_capacity_kwh,
+                battery_max_charge_kw = excluded.battery_max_charge_kw,
+                battery_max_discharge_kw = excluded.battery_max_discharge_kw
             """,
             (
                 hid,
                 f"bus_{hid}",
                 has_solar,
-                capacity
+                capacity,
+                has_battery,
+                battery_capacity_kwh,
+                battery_max_charge_kw,
+                battery_max_discharge_kw,
             )
         )
 

@@ -7,7 +7,11 @@ CREATE TABLE IF NOT EXISTS houses(
     house_id TEXT PRIMARY KEY,
     bus_id TEXT,
     has_solar INTEGER,
-    panel_capacity_kw REAL
+    panel_capacity_kw REAL,
+    has_battery INTEGER DEFAULT 0,
+    battery_capacity_kwh REAL DEFAULT 0,
+    battery_max_charge_kw REAL DEFAULT 0,
+    battery_max_discharge_kw REAL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS meter_readings(
@@ -31,6 +35,25 @@ CREATE TABLE IF NOT EXISTS grid_state(
     transformer_loading_pct REAL,
     losses_kw REAL
 );
+
+-- One computed grid reading per bus per timestamp.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_grid_state_unique
+    ON grid_state(timestamp, bus_id);
+
+-- Battery state of charge, recomputed every simulation step.
+-- Kept as a time series (not just "current value") so RL replay /
+-- auditing can look back at how SoC evolved.
+CREATE TABLE IF NOT EXISTS battery_state(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT,
+    house_id TEXT,
+    soc_kwh REAL,
+    soc_pct REAL,
+    charge_kw REAL          -- positive = charging, negative = discharging
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_battery_state_unique
+    ON battery_state(timestamp, house_id);
 
 CREATE TABLE IF NOT EXISTS transitions(
     episode_id TEXT,

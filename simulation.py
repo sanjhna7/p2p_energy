@@ -1,40 +1,113 @@
+"""
+Simulation step: for a given timestamp, compute battery SoC and bus
+voltage for every house/bus, persist them, then hand the assembled
+state to the (still placeholder) RL agent.
+
+This file is deliberately thin. All actual physics live in
+battery_model.py / grid_model.py so they can be tested and swapped
+independently (see the module docstrings there for why).
+"""
+
+from collections import defaultdict
+import uuid
+
 from database import get_connection
 from state import get_state
-import uuid
+import battery_model
+import grid_model
+
+
+def _previous_battery_soc(conn, house_id, timestamp):
+    """Look up this house's SoC from the most recent prior timestamp.
+    Falls back to 0 (empty battery) if there's no history yet."""
+
+    row = conn.execute("""
+        SELECT soc_kwh FROM battery_state
+        WHERE house_id = ? AND timestamp < ?
+        ORDER BY timestamp DESC LIMIT 1
+    """, (house_id, timestamp)).fetchone()
+
+    return row[0] if row else 0.0
 
 
 def simulate_step(timestamp):
 
-    # Get current state
-    state = get_state(timestamp)
-
-    # Generate a unique episode ID
-    episode_id = str(uuid.uuid4())
-
-    # RL Agent picks an action (placeholder)
-    action = {"house_1": "export_surplus"}
-
-    # Power Flow Simulation (placeholder)
-    new_voltage = 0.98
-    losses = 1.2
-
-    reward = 0.5
-
     conn = get_connection()
 
-    # Store grid state
-    conn.execute("""
-        INSERT INTO grid_state
-        (timestamp, bus_id, voltage_pu, losses_kw)
-        VALUES (?, ?, ?, ?)
-    """, (
-        timestamp,
-        "bus_1",
-        new_voltage,
-        losses
-    ))
+    houses = conn.execute("""
+        SELECT house_id, bus_id, has_battery, battery_capacity_kwh,
+               battery_max_charge_kw, battery_max_discharge_kw
+        FROM houses
+    """).fetchall()
 
-    # Store transition
+    meter = dict(conn.execute("""
+        SELECT house_id, solar_kw - load_kw AS net_kw
+        FROM meter_readings WHERE timestamp = ?
+    """, (timestamp,)).fetchall())
+
+    residual_by_bus = defaultdict(float)
+    load_by_bus = defaultdict(float)
+
+    battery_rows = []
+
+    for house_id, bus_id, has_battery, capacity_kwh, max_charge_kw, max_discharge_kw in houses:
+
+        net_kw = meter.get(house_id, 0.0)
+
+        if has_battery and capacity_kwh:
+            prev_soc = _previous_battery_soc(conn, house_id, timestamp)
+
+            result = battery_model.step_battery(
+                prev_soc_kwh=prev_soc,
+                capacity_kwh=capacity_kwh,
+                net_kw=net_kw,
+                max_charge_kw=max_charge_kw or capacity_kwh,
+                max_discharge_kw=max_discharge_kw or capacity_kwh,
+            )
+
+            battery_rows.append((timestamp, house_id, result.soc_kwh, result.soc_pct, result.charge_kw))
+            residual_kw = result.residual_kw
+        else:
+            residual_kw = net_kw
+
+        residual_by_bus[bus_id] += residual_kw
+        load_by_bus[bus_id] += abs(net_kw)
+
+    conn.executemany("""
+        INSERT OR REPLACE INTO battery_state
+        (timestamp, house_id, soc_kwh, soc_pct, charge_kw)
+        VALUES (?,?,?,?,?)
+    """, battery_rows)
+
+    grid_rows = []
+    for bus_id, residual_kw in residual_by_bus.items():
+        bus_result = grid_model.compute_bus_state(residual_kw, load_by_bus[bus_id])
+        grid_rows.append((
+            timestamp, bus_id,
+            bus_result.voltage_pu,
+            bus_result.transformer_loading_pct,
+            bus_result.losses_kw,
+        ))
+
+    conn.executemany("""
+        INSERT OR REPLACE INTO grid_state
+        (timestamp, bus_id, voltage_pu, transformer_loading_pct, losses_kw)
+        VALUES (?,?,?,?,?)
+    """, grid_rows)
+
+    conn.commit()
+    conn.close()
+
+    # Now the full state (solar/load/battery/voltage) can be read back
+    # through the normal data-layer API for whatever consumes it next
+    # (RL agent placeholder for now).
+    state = get_state(timestamp)
+
+    episode_id = str(uuid.uuid4())
+    action = {"house_1": "export_surplus"}  # RL agent placeholder
+    reward = 0.5                             # RL agent placeholder
+
+    conn = get_connection()
     conn.execute("""
         INSERT INTO transitions
         VALUES (?, ?, ?, ?, ?, ?)
@@ -44,13 +117,13 @@ def simulate_step(timestamp):
         str(state),
         str(action),
         reward,
-        str(get_state("2010-07-15 13:30:00"))
+        str(state),
     ))
-
     conn.commit()
     conn.close()
 
-    print("Step complete.")
+    print(f"Step complete for {timestamp}: "
+          f"{len(battery_rows)} batteries, {len(grid_rows)} buses updated.")
 
 
 if __name__ == "__main__":
