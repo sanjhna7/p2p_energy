@@ -17,17 +17,30 @@ import battery_model
 import grid_model
 
 
-def _previous_battery_soc(conn, house_id, timestamp):
-    """Look up this house's SoC from the most recent prior timestamp.
-    Falls back to 0 (empty battery) if there's no history yet."""
+def _previous_battery_socs(conn, timestamp):
+    """Look up every house's SoC from its most recent prior timestamp in
+    one query, instead of one query per house. Falls back to 0 (empty
+    battery) for any house with no history yet - callers should use
+    .get(house_id, 0.0) on the returned dict.
 
-    row = conn.execute("""
-        SELECT soc_kwh FROM battery_state
-        WHERE house_id = ? AND timestamp < ?
-        ORDER BY timestamp DESC LIMIT 1
-    """, (house_id, timestamp)).fetchone()
+    Same result as calling the old per-house lookup in a loop, but one
+    round-trip to SQLite instead of one per house per step - matters
+    once this runs across many houses x many timestamps in a training
+    loop."""
 
-    return row[0] if row else 0.0
+    rows = conn.execute("""
+        SELECT bs.house_id, bs.soc_kwh
+        FROM battery_state bs
+        INNER JOIN (
+            SELECT house_id, MAX(timestamp) AS max_ts
+            FROM battery_state
+            WHERE timestamp < ?
+            GROUP BY house_id
+        ) latest
+        ON bs.house_id = latest.house_id AND bs.timestamp = latest.max_ts
+    """, (timestamp,)).fetchall()
+
+    return dict(rows)
 
 
 def simulate_step(timestamp, episode_id=None, step=0):
@@ -69,8 +82,9 @@ def simulate_step(timestamp, episode_id=None, step=0):
         FROM meter_readings WHERE timestamp = ?
     """, (timestamp,)).fetchall())
 
+    prev_socs = _previous_battery_socs(conn, timestamp)
+
     residual_by_bus = defaultdict(float)
-    load_by_bus = defaultdict(float)
 
     battery_rows = []
 
@@ -79,7 +93,7 @@ def simulate_step(timestamp, episode_id=None, step=0):
         net_kw = meter.get(house_id, 0.0)
 
         if has_battery and capacity_kwh:
-            prev_soc = _previous_battery_soc(conn, house_id, timestamp)
+            prev_soc = prev_socs.get(house_id, 0.0)
 
             result = battery_model.step_battery(
                 prev_soc_kwh=prev_soc,
@@ -102,7 +116,6 @@ def simulate_step(timestamp, episode_id=None, step=0):
             residual_kw = net_kw
 
         residual_by_bus[bus_id] += residual_kw
-        load_by_bus[bus_id] += abs(net_kw)
 
     conn.executemany("""
         INSERT OR REPLACE INTO battery_state
@@ -112,7 +125,7 @@ def simulate_step(timestamp, episode_id=None, step=0):
 
     grid_rows = []
     for bus_id, residual_kw in residual_by_bus.items():
-        bus_result = grid_model.compute_bus_state(residual_kw, load_by_bus[bus_id])
+        bus_result = grid_model.compute_bus_state(residual_kw)
         grid_rows.append((
             timestamp, bus_id,
             bus_result.voltage_pu,
