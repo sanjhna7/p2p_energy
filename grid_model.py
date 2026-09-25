@@ -49,7 +49,7 @@ def compute_bus_voltage(
     Baseline proxy only: voltage rises slightly on export, droops
     slightly on import. Replace with a real power-flow / GNN call later.
     """
-    return round(nominal_voltage_pu + sensitivity * (net_injection_kw / 100.0), 4)
+    return round(nominal_voltage_pu + sensitivity * net_injection_kw, 4)
 
 
 def compute_transformer_loading(total_load_kw: float, rated_kw: float = TRANSFORMER_RATED_KW) -> float:
@@ -62,10 +62,19 @@ def compute_losses(total_flow_kw: float, loss_coefficient: float = LOSS_COEFFICI
     return round(abs(total_flow_kw) * loss_coefficient, 4)
 
 
-def compute_bus_state(net_injection_kw: float, total_load_kw: float) -> BusResult:
-    """Convenience wrapper bundling the three bus-level outputs together."""
+def compute_bus_state(net_injection_kw: float) -> BusResult:
+    """Convenience wrapper bundling the three bus-level outputs together.
+
+    All three figures are derived from the same net_injection_kw - the
+    power this bus actually exchanges with the transformer/upstream
+    grid *after* any local battery buffering (and, once multiple houses
+    share a bus, after any local P2P netting between them). Feeding
+    transformer_loading a different, pre-netting number would overstate
+    loading: two houses on the same bus trading surplus/deficit locally
+    never touch the transformer for that portion of their power at all.
+    """
     return BusResult(
         voltage_pu=compute_bus_voltage(net_injection_kw),
-        transformer_loading_pct=compute_transformer_loading(total_load_kw),
+        transformer_loading_pct=compute_transformer_loading(net_injection_kw),
         losses_kw=compute_losses(net_injection_kw),
     )

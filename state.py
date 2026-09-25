@@ -1,5 +1,6 @@
 import sqlite3
 from database import get_connection
+from grid_model import NOMINAL_VOLTAGE_PU
 
 
 def get_state(timestamp):
@@ -15,6 +16,18 @@ def get_state(timestamp):
 
     Bus-level grid state (voltage, transformer loading, losses) is
     attached separately via `bus_id` lookups against grid_state.
+
+    Every numeric field returned here is guaranteed non-NULL, even when
+    this timestamp hasn't been simulated yet (e.g. a `pre_state` snapshot
+    taken before simulate_step runs) - callers that turn this into a
+    feature vector/tensor should never have to special-case None:
+      - soc_kwh / soc_pct / charge_kw default to 0.0 (empty, idle
+        battery) whether that's because the house has no battery at all
+        or because this timestamp just hasn't been simulated yet - same
+        convention _previous_battery_soc already uses for "no history".
+      - voltage_pu / transformer_loading_pct / losses_kw default to
+        nominal/no-flow (as if net_injection_kw were 0) when this bus
+        hasn't been simulated for this timestamp yet.
 
     Callers (simulation.py, RL agent, later GNN) should only ever go
     through this function - never query meter_readings/battery_state/
@@ -32,9 +45,9 @@ def get_state(timestamp):
             h.battery_capacity_kwh,
             COALESCE(m.solar_kw,0) AS solar_kw,
             COALESCE(m.load_kw,0) AS load_kw,
-            b.soc_kwh,
-            b.soc_pct,
-            b.charge_kw,
+            COALESCE(b.soc_kwh,0) AS soc_kwh,
+            COALESCE(b.soc_pct,0) AS soc_pct,
+            COALESCE(b.charge_kw,0) AS charge_kw,
             b.residual_kw
 
         FROM houses h
@@ -89,9 +102,17 @@ def get_state(timestamp):
             house["status"] = "balanced"
 
         bus = bus_lookup.get(house["bus_id"])
-        house["voltage_pu"] = bus["voltage_pu"] if bus else None
-        house["transformer_loading_pct"] = bus["transformer_loading_pct"] if bus else None
-        house["losses_kw"] = bus["losses_kw"] if bus else None
+        if bus:
+            house["voltage_pu"] = bus["voltage_pu"]
+            house["transformer_loading_pct"] = bus["transformer_loading_pct"]
+            house["losses_kw"] = bus["losses_kw"]
+        else:
+            # Not simulated yet for this timestamp - assume nominal,
+            # no-flow conditions (equivalent to net_injection_kw == 0)
+            # rather than leaving these None for downstream consumers.
+            house["voltage_pu"] = NOMINAL_VOLTAGE_PU
+            house["transformer_loading_pct"] = 0.0
+            house["losses_kw"] = 0.0
 
         houses.append(house)
 
