@@ -1,6 +1,6 @@
 import sqlite3
 
-DB_PATH = "p2p_energy.db"
+DB_PATH = "data/raw/p2p_energy.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS houses(

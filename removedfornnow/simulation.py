@@ -13,7 +13,7 @@ import uuid
 
 from database import get_connection
 from state import get_state
-import battery_model
+from nanogrid import battery_model
 import grid_model
 
 

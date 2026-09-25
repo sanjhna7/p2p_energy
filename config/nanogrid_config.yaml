@@ -1,0 +1,115 @@
+# =====================================================================
+# Provisional DC-nanogrid simulation configuration
+# =====================================================================
+#
+# Every assumption made by the provisional dataset generator lives here.
+# No magic numbers in the Python modules.
+#
+# PROVENANCE WARNING
+# ------------------
+# Only the PV and load *temporal profiles* come from the Ausgrid Solar
+# Home Electricity Dataset (2010-2011). Every voltage, current, battery
+# and bus-tie figure below is an ASSUMPTION of the provisional model and
+# will be replaced by the Simulink/hardware simulation outputs once the
+# hardware team completes it. See docs/PROVISIONAL_DATASET.md.
+# =====================================================================
+
+source:
+  # Ausgrid data is read from the project SQLite DB (already ingested by
+  # ingest.py, already converted to average kW). If the DB is missing or
+  # empty, the raw CSV is parsed instead.
+  db_path: "data/raw/p2p_energy.db"
+  csv_path: "data/raw/Solar home 2010-2011.csv"
+  # Length of one Ausgrid metering interval, in hours. The CSV stores
+  # ENERGY (kWh per half hour); P(kW) = E(kWh) / 0.5 = 2 x E(kWh).
+  interval_hours: 0.5
+  # Number of houses (= MARL agents). Scale to 5 / 10 / 20 / 50 / 100.
+  n_houses: 3
+  # Which distinct real Ausgrid customers back the houses. `null` picks
+  # the first n_houses customers (by id) that have PV capacity > 0 and a
+  # complete time series. Give an explicit list to pin the selection.
+  customer_ids: null
+  # Restrict the simulated window. `null` = whole year (17520 steps).
+  start_timestamp: null
+  end_timestamp: null
+  max_days: 14
+
+pv:
+  # Provisional hardware PV array rating. The real Ausgrid generation
+  # profile is normalised by that customer's own "Generator Capacity"
+  # (kWp) and then re-scaled to this value, so the REAL temporal shape
+  # is preserved while the magnitude matches our hardware.
+  capacity_kw: 3.0
+  # ASSUMPTION: nominal DC operating voltage of the PV converter output.
+  # Not from Ausgrid. pv_current = pv_power / pv_voltage.
+  nominal_voltage: 48.0
+
+load:
+  # Fraction of the real household demand (GC + CL) represented as DC
+  # load in the provisional nanogrid. 1.0 = use the profile as-is.
+  dc_load_fraction: 1.0
+  # ASSUMPTION: nominal DC load bus voltage. Not from Ausgrid.
+  nominal_voltage: 48.0
+
+battery:
+  capacity_kwh: 5.0
+  initial_soc: 0.5          # fraction of nameplate capacity
+  min_soc: 0.2
+  max_soc: 0.9
+  max_charge_kw: 2.0
+  max_discharge_kw: 2.0
+  charge_efficiency: 0.95
+  discharge_efficiency: 0.95
+  # ASSUMPTION: nominal battery terminal voltage. Not from Ausgrid.
+  nominal_voltage: 48.0
+
+bus:
+  local_nominal_voltage: 48.0
+  community_nominal_voltage: 48.0
+  # Volts of droop per kW imported through the bus tie. Provisional
+  # linear approximation of the future DC power-flow solution.
+  local_virtual_droop: 0.5
+  # Volts of droop per kW of aggregate community net demand.
+  community_droop: 0.05
+  voltage_min: 44.0
+  voltage_max: 52.0
+  community_voltage_min: 44.0
+  community_voltage_max: 52.0
+
+tie:
+  # Bidirectional bus-tie converter rating.
+  #   tie_power > 0 : house -> community (export)
+  #   tie_power < 0 : community -> house (import)
+  max_power_kw: 5.0
+
+network:
+  # Fraction of exported energy lost in the community network.
+  loss_fraction: 0.02
+  # Community topology. "chain" = House0 - House1 - ... - HouseN-1.
+  topology: chain
+  topology_path: "data/processed/topology.json"
+
+observation:
+  # The MARL agent observation vector. Change this list to change the
+  # observation space - nothing else needs editing.
+  features:
+    - pv_power
+    - load_power
+    - battery_soc
+    - local_bus_voltage
+    - tie_power
+    - community_bus_voltage
+
+output:
+  dataset_path: "data/processed/marl_simulation_dataset.csv"
+  observations_path: "data/processed/agent_observations.csv"
+  community_path: "data/processed/community_state.csv"
+  metadata_path: "data/processed/dataset_metadata.json"
+  plots_dir: "data/processed/plots"
+
+validation:
+  # Absolute tolerances used by validate.py.
+  power_tolerance_kw: 1.0e-6
+  energy_balance_tolerance_kw: 1.0e-6
+  ohm_tolerance_a: 1.0e-6
+  profile_correlation_min: 0.999

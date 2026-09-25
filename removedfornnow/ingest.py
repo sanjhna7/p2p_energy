@@ -1,7 +1,7 @@
 import pandas as pd
 from database import get_connection, METER_INTERVAL_HOURS
 
-CSV_FILE = "Solar home 2010-2011.csv"
+CSV_FILE = "data/raw/Solar home 2010-2011.csv"
 
 
 def ingest_data():
