@@ -35,6 +35,10 @@ def main():
 
     simulate_step(timestamp)
 
+    print("\n5. Reading UPDATED state...")
+    updated_state = get_state(timestamp)
+    print(updated_state["houses"][0]) 
+
     print("\nDone.")
 
 
