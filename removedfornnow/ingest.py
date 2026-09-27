@@ -1,7 +1,7 @@
 import pandas as pd
-from database import get_connection
+from database import get_connection, METER_INTERVAL_HOURS
 
-CSV_FILE = "Solar home 2010-2011.csv"
+CSV_FILE = "data/raw/Solar home 2010-2011.csv"
 
 
 def ingest_data():
@@ -73,8 +73,25 @@ def ingest_data():
 
     pivot["house_id"] = pivot["house_id"].astype(str)
 
+    # UNITS: the Ausgrid CSV records ENERGY, not power - every interval
+    # value is the kWh consumed/generated during that half hour (see
+    # "Ausgrid solar home electricity data notes (Aug 2014).pdf",
+    # columns 6-53). The rest of the system works in average POWER, so
+    # convert once, here:
+    #
+    #     average_kW = kWh_in_interval / interval_hours
+    #
+    # i.e. a 0.5 h interval means multiplying by 2. Doing it at ingest
+    # is what keeps meter_readings.solar_kw / load_kw honest to their
+    # names: everything downstream (battery_model, grid_model) then
+    # reads real kW and applies its own dt_hours for energy, with no
+    # second interval factor sneaking in.
+    pivot["solar_kw"] = pivot["solar_kw"] / METER_INTERVAL_HOURS
+    pivot["load_kw"] = pivot["load_kw"] / METER_INTERVAL_HOURS
+
     # Installed PV capacity per house, taken from the CSV instead of
     # being hardcoded. Each customer carries one capacity value.
+    # Already in kW (the CSV records kWp, peak power), so no conversion.
     capacity_by_house = df.groupby("Customer")["Generator Capacity"].max()
     capacity_by_house.index = capacity_by_house.index.astype(str)
 
@@ -91,20 +108,39 @@ def ingest_data():
 
         has_solar = 1 if capacity > 0 else 0
 
+        # NOTE: the Ausgrid CSV has no battery data at all. These are
+        # simulation-baseline assumptions (only solar houses get a
+        # battery, sized off panel capacity), not measured values.
+        # Tune/replace once real battery specs are available.
+        has_battery = has_solar
+        battery_capacity_kwh = round(capacity * 2, 2) if has_battery else 0.0
+        battery_max_charge_kw = round(capacity, 2) if has_battery else 0.0
+        battery_max_discharge_kw = round(capacity, 2) if has_battery else 0.0
+
         conn.execute(
             """
             INSERT INTO houses
-            (house_id, bus_id, has_solar, panel_capacity_kw)
-            VALUES (?,?,?,?)
+            (house_id, bus_id, has_solar, panel_capacity_kw,
+             has_battery, battery_capacity_kwh,
+             battery_max_charge_kw, battery_max_discharge_kw)
+            VALUES (?,?,?,?,?,?,?,?)
             ON CONFLICT(house_id) DO UPDATE SET
                 has_solar = excluded.has_solar,
-                panel_capacity_kw = excluded.panel_capacity_kw
+                panel_capacity_kw = excluded.panel_capacity_kw,
+                has_battery = excluded.has_battery,
+                battery_capacity_kwh = excluded.battery_capacity_kwh,
+                battery_max_charge_kw = excluded.battery_max_charge_kw,
+                battery_max_discharge_kw = excluded.battery_max_discharge_kw
             """,
             (
                 hid,
                 f"bus_{hid}",
                 has_solar,
-                capacity
+                capacity,
+                has_battery,
+                battery_capacity_kwh,
+                battery_max_charge_kw,
+                battery_max_discharge_kw,
             )
         )
 
