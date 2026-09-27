@@ -6,7 +6,6 @@ MARL dataset.
 
 At present, it contains only two files:
 
-- `README.md` — notes about what is parked here and how to restore it
 - `ingest.py` — legacy Ausgrid CSV ingestion script used to build the raw
   SQLite database
 
@@ -22,7 +21,6 @@ used by the earlier simulation stack.
 
 | File | What it does | Why it is parked |
 | --- | --- | --- |
-| `README.md` | Explains the parked folder and restore steps | Keeps the archive's purpose clear without changing the active code path |
 | `ingest.py` | Ausgrid CSV → `houses` + `meter_readings` (kWh → kW) | This is the only remaining legacy file in the folder; the current experiment no longer uses it directly |
 
 ## Does the experiment still work without these?
