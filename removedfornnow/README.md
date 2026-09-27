@@ -1,34 +1,29 @@
 # removedfornnow
 
-Files parked here are **not used by the current experiment** (the
-provisional MARL development dataset). Nothing was deleted — everything
-is intact, with git history preserved, and any of it can be moved back
-to the project root.
+This folder is intentionally kept as a small holding area for code that
+is temporarily parked while the project is rebuilt around the provisional
+MARL dataset.
 
-## What is here, and why it was parked
+At present, it contains only two files:
 
-These files are the earlier **SQLite simulation pipeline**. It reads the
-Ausgrid CSV into `p2p_energy.db`, then steps a battery and a per-unit
-bus-voltage proxy over that database, writing results back into it.
+- `README.md` — notes about what is parked here and how to restore it
+- `ingest.py` — legacy Ausgrid CSV ingestion script used to build the raw
+  SQLite database
+
+Nothing has been deleted from the repository. The rest of the older
+SQLite pipeline has already been moved aside or superseded, and anything
+here can be restored to the project root if needed.
+
+## What is parked here
+
+The remaining parked item is the older **SQLite ingestion pipeline** that
+reads the Ausgrid CSV into `p2p_energy.db` and prepares the raw database
+used by the earlier simulation stack.
 
 | File | What it does | Why it is parked |
 | --- | --- | --- |
-| `main.py` | Driver: init DB → ingest CSV → read state → one sim step | The experiment's entry point is `build_marl_dataset.py` |
-| `database.py` | SQLite schema, migrations, `get_connection()` | The dataset generator opens the DB read-only with plain `sqlite3` |
-| `ingest.py` | Ausgrid CSV → `houses` + `meter_readings` (kWh → kW) | **This is what built `data/raw/p2p_energy.db`.** Only needed to rebuild it |
-| `state.py` | Assembles per-house state dicts from the DB | Superseded by `nanogrid/build_dataset.py` |
-| `simulation.py` | One timestep across all houses, writes `battery_state` / `grid_state` | Superseded by the `nanogrid` time loop |
-| `grid_model.py` | Per-unit AC-style droop proxy (`voltage_pu`, transformer loading, losses) | The experiment needs **DC bus volts**, so `nanogrid/models.py` replaces it |
-| `check_db.py` | Ad-hoc `SELECT`s against `houses` / `meter_readings` | Inspection script |
-| `check_simulation.py` | Ad-hoc `SELECT`s against `grid_state` / `transitions` | Inspection script |
-
-## What was NOT parked
-
-`battery_model.py` moved to **`nanogrid/battery_model.py`**, not here. It
-is the one piece of the old pipeline the experiment still uses:
-`nanogrid/models.py` builds its provisional battery on top of
-`step_battery()`, so the repository keeps a single set of charge and
-discharge equations.
+| `README.md` | Explains the parked folder and restore steps | Keeps the archive's purpose clear without changing the active code path |
+| `ingest.py` | Ausgrid CSV → `houses` + `meter_readings` (kWh → kW) | This is the only remaining legacy file in the folder; the current experiment no longer uses it directly |
 
 ## Does the experiment still work without these?
 
@@ -37,22 +32,22 @@ straight from `data/raw/p2p_energy.db`, and if that database is missing
 it falls back to parsing `data/raw/Solar home 2010-2011.csv` directly.
 Both paths have been verified to produce bit-identical output.
 
-## Running the parked pipeline
+## Running the parked ingestion script
 
-Paths inside these files are relative to the **project root**, so run
-them from there and not from inside this folder:
+Paths inside `ingest.py` are relative to the **project root**, so run it
+from there and not from inside this folder:
 
 ```bash
-python removedfornnow/main.py          # full old pipeline
-python removedfornnow/ingest.py        # rebuild data/raw/p2p_energy.db
-python removedfornnow/check_db.py      # inspect the database
+python removedfornnow/ingest.py
 ```
 
-Two paths were updated when the files moved, and nothing else changed:
+The script expects the data file at:
 
-- `database.py` → `DB_PATH = "data/raw/p2p_energy.db"`
-- `ingest.py` → `CSV_FILE = "data/raw/Solar home 2010-2011.csv"`
-- `simulation.py` → `from nanogrid import battery_model`
+- `data/raw/Solar home 2010-2011.csv`
+
+and writes the database to:
+
+- `data/raw/p2p_energy.db`
 
 ## Restoring a file
 
@@ -60,4 +55,5 @@ Two paths were updated when the files moved, and nothing else changed:
 git mv removedfornnow/<file>.py .
 ```
 
-Then undo the path edits above if you also move the raw data back.
+If the file is `ingest.py`, also restore the raw data path assumptions in
+that script if you want to run it from the project root again.
