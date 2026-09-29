@@ -1,6 +1,8 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
 
 # Virtual Environment
 venv/
@@ -16,5 +18,9 @@ venv/
 .DS_Store
 Thumbs.db
 
-#Database check
-che_dbb.py
+# Generated data files
+synthetic_dc_microgrid_data.csv
+data/processed/
+
+# Logs
+*.log

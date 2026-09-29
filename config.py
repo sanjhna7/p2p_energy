@@ -13,7 +13,7 @@ from typing import Optional, Sequence
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "nanogrid_config.yaml"
 
 
