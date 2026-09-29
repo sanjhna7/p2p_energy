@@ -1,22 +1,9 @@
 """
-Provisional electrical model of one household DC nanogrid.
+Energy environment: physics models, state, observations, and topology.
 
-                      PV
-                       |
-                  Local DC Bus
-                 /            \
-           Battery           DC Load
-                 \            /
-             Bus Tie Converter
-                       |
-              Community DC Bus
-
-NONE of the voltages, currents or battery quantities produced here come
-from the Ausgrid dataset - that dataset contains energy meter readings
-only. They are a deliberately simple, physically consistent
-approximation, standing in for the Simulink/hardware model until it is
-finished. Every constant they depend on comes from
-config/nanogrid_config.yaml.
+This module consolidates the DC nanogrid electrical model, battery
+physics, MARL observation extraction, and community topology into a
+single environment definition.
 
 SIGN CONVENTIONS (used everywhere, without exception)
 -----------------------------------------------------
@@ -33,22 +20,109 @@ Power in kW, energy in kWh, voltage in V, current in A. Currents
 therefore carry a factor of 1000:  I(A) = 1000 * P(kW) / V(V).
 """
 
+import json
 from dataclasses import dataclass, asdict
+from typing import List, Tuple
 
-from . import battery_model
-from .config import BatteryConfig, BusConfig, NanogridConfig, TieConfig
+import numpy as np
+
+from config import BatteryConfig, BusConfig, NanogridConfig, TieConfig
 
 W_PER_KW = 1000.0
 
 
-def current_from_power(power_kw: float, voltage_v: float) -> float:
-    """P = V x I, with kW -> W handled in one place.
+# =====================================================================
+# 1. Battery physics (low-level core)
+# =====================================================================
 
-    Callers pass a positive nominal voltage (config._check enforces it),
-    so this never divides by zero.
+DEFAULT_DT_HOURS = 0.5          # matches the 30-min Ausgrid interval
+DEFAULT_CHARGE_EFFICIENCY = 0.95
+DEFAULT_DISCHARGE_EFFICIENCY = 0.95
+
+
+@dataclass
+class BatteryResult:
+    """Result from the low-level battery step equations."""
+    soc_kwh: float
+    soc_pct: float
+    charge_kw: float     # +ve = charging, -ve = discharging, 0 = idle
+    residual_kw: float   # leftover surplus/deficit after battery action
+
+
+def step_battery_core(
+    prev_soc_kwh: float,
+    capacity_kwh: float,
+    net_kw: float,
+    max_charge_kw: float,
+    max_discharge_kw: float,
+    dt_hours: float = DEFAULT_DT_HOURS,
+    charge_eff: float = DEFAULT_CHARGE_EFFICIENCY,
+    discharge_eff: float = DEFAULT_DISCHARGE_EFFICIENCY,
+) -> BatteryResult:
     """
+    Advance one house's battery by a single timestep (low-level).
+
+    This is a deterministic, rule-based physics model — NOT a learned
+    model. Control policy: simple greedy self-consumption.
+
+    prev_soc_kwh    : SoC carried over from the previous step
+    capacity_kwh    : usable battery capacity for this house
+    net_kw          : solar_kw - load_kw for this step
+    max_charge_kw   : house battery charge rate limit
+    max_discharge_kw: house battery discharge rate limit
+    """
+
+    if capacity_kwh <= 0:
+        # No battery installed at this house -> pass everything straight
+        # through as residual (this house has no storage to buffer with).
+        return BatteryResult(0.0, 0.0, 0.0, net_kw)
+
+    if net_kw >= 0:
+        # Surplus: try to charge.
+        charge_kw = min(net_kw, max_charge_kw)
+        headroom_kwh = capacity_kwh - prev_soc_kwh
+        max_chargeable_kw = headroom_kwh / dt_hours / charge_eff if dt_hours > 0 else 0
+        charge_kw = max(0.0, min(charge_kw, max_chargeable_kw))
+
+        new_soc_kwh = prev_soc_kwh + charge_kw * charge_eff * dt_hours
+        residual_kw = net_kw - charge_kw
+
+        return BatteryResult(
+            soc_kwh=round(new_soc_kwh, 4),
+            soc_pct=round(100 * new_soc_kwh / capacity_kwh, 2),
+            charge_kw=round(charge_kw, 4),
+            residual_kw=round(residual_kw, 4),
+        )
+
+    else:
+        # Deficit: try to discharge.
+        deficit_kw = -net_kw
+        discharge_kw = min(deficit_kw, max_discharge_kw)
+        available_kwh = prev_soc_kwh
+        max_dischargeable_kw = (available_kwh * discharge_eff) / dt_hours if dt_hours > 0 else 0
+        discharge_kw = max(0.0, min(discharge_kw, max_dischargeable_kw))
+
+        new_soc_kwh = prev_soc_kwh - (discharge_kw / discharge_eff) * dt_hours
+        residual_kw = net_kw + discharge_kw  # still negative if battery couldn't cover it all
+
+        return BatteryResult(
+            soc_kwh=round(new_soc_kwh, 4),
+            soc_pct=round(100 * new_soc_kwh / capacity_kwh, 2),
+            charge_kw=round(-discharge_kw, 4),
+            residual_kw=round(residual_kw, 4),
+        )
+
+
+# =====================================================================
+# 2. DC nanogrid physics models
+# =====================================================================
+
+def current_from_power(power_kw: float, voltage_v: float) -> float:
+    """P = V x I, with kW -> W handled in one place."""
     return W_PER_KW * power_kw / voltage_v
 
+
+# ----- House state -----
 
 @dataclass
 class HouseState:
@@ -80,10 +154,7 @@ class HouseState:
     battery_discharge_power: float
     energy_exchange: float
 
-    # Slack terms. Non-zero only when the bus-tie converter rating binds:
-    # surplus that cannot be exported is curtailed, deficit that cannot
-    # be imported goes unserved. Recorded rather than silently dropped,
-    # because the household energy balance in validate.py needs them.
+    # Slack terms. Non-zero only when the bus-tie converter rating binds.
     curtailed_power: float
     unserved_power: float
 
@@ -91,9 +162,7 @@ class HouseState:
         return asdict(self)
 
 
-# ---------------------------------------------------------------------
-# PV
-# ---------------------------------------------------------------------
+# ----- PV -----
 
 def pv_power_from_ausgrid(
     ausgrid_pv_kw: float,
@@ -104,12 +173,6 @@ def pv_power_from_ausgrid(
 
         pv_pu     = ausgrid_pv_kw / ausgrid_capacity_kwp
         pv_power  = pv_pu * hardware_capacity_kw
-
-    Normalising by the customer's own installed capacity is what makes
-    this a re-scaling rather than a re-invention: the per-unit series is
-    that household's real, weather-driven, seasonal generation shape, and
-    only its magnitude changes. No generic clear-sky/solar-geometry
-    equation is used anywhere.
     """
 
     if ausgrid_capacity_kwp <= 0:
@@ -118,9 +181,6 @@ def pv_power_from_ausgrid(
         )
 
     pv_pu = ausgrid_pv_kw / ausgrid_capacity_kwp
-    # Ausgrid's gross generation channel is non-negative by definition;
-    # clamp defensively so a stray negative can never become "negative
-    # sunlight" downstream.
     return max(0.0, pv_pu * hardware_capacity_kw)
 
 
@@ -129,12 +189,11 @@ def load_power_from_ausgrid(ausgrid_load_kw: float, dc_load_fraction: float) -> 
     return max(0.0, ausgrid_load_kw * dc_load_fraction)
 
 
-# ---------------------------------------------------------------------
-# Battery
-# ---------------------------------------------------------------------
+# ----- Battery (high-level, config-aware wrapper) -----
 
 @dataclass
 class BatteryStep:
+    """High-level battery step result with SoC as fraction."""
     soc: float                 # fraction of nameplate capacity, in [min_soc, max_soc]
     power_kw: float            # > 0 discharging, < 0 charging
     charge_kw: float           # magnitude, >= 0
@@ -146,23 +205,10 @@ def step_battery(prev_soc: float, net_power_kw: float, cfg: BatteryConfig,
                  dt_hours: float) -> BatteryStep:
     """Advance the battery one timestep under greedy self-consumption.
 
-    Surplus charges the battery first and only the remainder is exported;
-    deficit discharges the battery first and only the remainder is
-    imported. That coupling is the point: SoC, tie power and bus voltage
-    are all consequences of the same real PV/load series, never
-    independent random columns.
-
-    Implemented on top of the shared battery_model.step_battery
-    so there is one set of charge/discharge equations in the repository.
-    That function cycles between 0 and its capacity argument, so it is
-    given the USABLE window (max_soc - min_soc) x capacity and an offset
-    state of charge; the equations it applies,
-
-        charging:    E(t+1) = E(t) + P_chg * eff * dt
-        discharging: E(t+1) = E(t) - P_dis / eff * dt
-
-    are exactly the SoC update this provisional model specifies, so the
-    result is bounded by min_soc and max_soc by construction.
+    Implemented on top of step_battery_core so there is one set of
+    charge/discharge equations. That function cycles between 0 and its
+    capacity argument, so it is given the USABLE window
+    (max_soc - min_soc) x capacity and an offset state of charge.
     """
 
     usable_kwh = cfg.usable_capacity_kwh
@@ -170,12 +216,11 @@ def step_battery(prev_soc: float, net_power_kw: float, cfg: BatteryConfig,
     if usable_kwh <= 0 or cfg.capacity_kwh <= 0:
         return BatteryStep(prev_soc, 0.0, 0.0, 0.0, net_power_kw)
 
-    # SoC fraction -> energy above the floor, which is what the shared
-    # battery model understands.
+    # SoC fraction -> energy above the floor.
     prev_usable_kwh = (prev_soc - cfg.min_soc) * cfg.capacity_kwh
     prev_usable_kwh = min(max(prev_usable_kwh, 0.0), usable_kwh)
 
-    result = battery_model.step_battery(
+    result = step_battery_core(
         prev_soc_kwh=prev_usable_kwh,
         capacity_kwh=usable_kwh,
         net_kw=net_power_kw,
@@ -186,21 +231,12 @@ def step_battery(prev_soc: float, net_power_kw: float, cfg: BatteryConfig,
         discharge_eff=cfg.discharge_efficiency,
     )
 
-    # battery_model rounds its power, its SoC and its residual to 4 dp
-    # INDEPENDENTLY, so those three no longer satisfy the energy balance
-    # exactly (they disagree at ~1e-4 kW). Take its power decision as the
-    # single source of truth and re-derive the SoC and the residual from
-    # it, so the row balances to machine precision. The rounding itself
-    # is kept - 0.1 W is a sane converter resolution - it just has to be
-    # applied once rather than three times.
-    #
-    # battery_model reports +ve = charging; this package reports
-    # +ve = discharging (section 10). The flip happens below.
+    # Take the core's power decision as the single source of truth and
+    # re-derive the SoC and residual from it, so the row balances to
+    # machine precision.
     power_kw = result.charge_kw       # +ve charging, at this point only
 
     if power_kw > 0:
-        # Cap by the energy the window can still absorb, so the rounding
-        # can never push SoC past max_soc.
         headroom_kwh = usable_kwh - prev_usable_kwh
         power_kw = min(power_kw, headroom_kwh / (cfg.charge_efficiency * dt_hours))
         power_kw = max(power_kw, 0.0)
@@ -226,15 +262,11 @@ def step_battery(prev_soc: float, net_power_kw: float, cfg: BatteryConfig,
         power_kw=discharge_kw - charge_kw,
         charge_kw=charge_kw,
         discharge_kw=discharge_kw,
-        # Exact by construction: whatever the battery did not take is
-        # what the bus tie must carry.
         residual_kw=net_power_kw - charge_kw + discharge_kw,
     )
 
 
-# ---------------------------------------------------------------------
-# Bus tie
-# ---------------------------------------------------------------------
+# ----- Bus tie -----
 
 @dataclass
 class TieStep:
@@ -245,12 +277,7 @@ class TieStep:
 
 def step_tie(residual_kw: float, cfg: TieConfig) -> TieStep:
     """Push whatever the battery could not absorb through the bus tie,
-    limited by the converter rating.
-
-    Whatever exceeds the rating is not quietly discarded: surplus is
-    reported as curtailment and deficit as unserved load, so the
-    household energy balance still closes exactly.
-    """
+    limited by the converter rating."""
 
     limit = cfg.max_power_kw
     power = min(max(residual_kw, -limit), limit)
@@ -258,81 +285,43 @@ def step_tie(residual_kw: float, cfg: TieConfig) -> TieStep:
     spill = residual_kw - power
     return TieStep(
         power_kw=power,
-        # Written as explicit branches rather than max(): max(-0.0, 0.0)
-        # returns -0.0, which would litter the CSV with negative zeros.
         curtailed_kw=spill if spill > 0 else 0.0,
         unserved_kw=-spill if spill < 0 else 0.0,
     )
 
 
-# ---------------------------------------------------------------------
-# Local DC bus
-# ---------------------------------------------------------------------
+# ----- Local DC bus -----
 
 def local_bus_voltage(tie_power_kw: float, cfg: BusConfig) -> float:
     """Provisional droop approximation of the local DC bus voltage.
 
         V_local = V_nominal - R_virtual * P_imported
-
-    where P_imported = -tie_power is the power the local bus draws from
-    the community through the tie. Importing loads the bus and pulls its
-    voltage down; exporting pushes it up. Bounded by voltage_min /
-    voltage_max, which validate.py re-checks and reports on.
-
-    This stands in for the DC power-flow solution of the Simulink model.
     """
-
     imported_kw = -tie_power_kw
     voltage = cfg.local_nominal_voltage - cfg.local_virtual_droop * imported_kw
     return min(max(voltage, cfg.voltage_min), cfg.voltage_max)
 
 
 def local_bus_current(pv_power_kw, battery_discharge_kw, imported_kw, voltage_v):
-    """Total power injected into the local DC bus, expressed as current.
-
-    Injection (PV + battery discharge + import from the community) equals
-    withdrawal (load + battery charging + export) by construction, so
-    either side gives the same figure; the injection side is used.
-    Reported as a magnitude, like the bus current a meter would read.
-    """
+    """Total power injected into the local DC bus, expressed as current."""
     injected_kw = pv_power_kw + battery_discharge_kw + max(imported_kw, 0.0)
     return abs(current_from_power(injected_kw, voltage_v))
 
 
-# ---------------------------------------------------------------------
-# Community DC bus
-# ---------------------------------------------------------------------
+# ----- Community DC bus -----
 
 @dataclass
 class CommunityStep:
     voltage: float
-    total_export_kw: float      # sum of positive tie powers
-    total_import_kw: float      # sum of negative tie powers, as magnitude
-    network_loss_kw: float      # loss on the exported energy
-    slack_kw: float             # external grid top-up (+) / absorption (-)
+    total_export_kw: float
+    total_import_kw: float
+    network_loss_kw: float
+    slack_kw: float
     aggregate_imbalance_kw: float
 
 
 def community_step(tie_powers, bus_cfg: BusConfig, loss_fraction: float) -> CommunityStep:
-    """One shared community DC bus voltage for every house at this step.
-
-        V_community = V_nominal - droop * aggregate_imbalance
-        aggregate_imbalance = total_import - total_export   (net demand)
-
-    Net community demand pulls the shared bus down; net community surplus
-    pushes it up. One value per timestep, so every connected house
-    observes the SAME community voltage - it is a shared bus, not a
-    per-house random number.
-
-    The community rarely balances exactly on real data, so the residual
-    is reported explicitly as `slack_kw` (the external grid connection)
-    rather than being hidden:
-
-        delivered = total_export * (1 - loss_fraction)
-        slack     = total_import - delivered
-        slack > 0 : community imports from the external grid
-        slack < 0 : community exports to the external grid
-    """
+    """One shared community DC bus voltage for every house at this step."""
 
     total_export = sum(p for p in tie_powers if p > 0)
     total_import = sum(-p for p in tie_powers if p < 0)
@@ -358,9 +347,7 @@ def community_step(tie_powers, bus_cfg: BusConfig, loss_fraction: float) -> Comm
     )
 
 
-# ---------------------------------------------------------------------
-# One house, one timestep
-# ---------------------------------------------------------------------
+# ----- One house, one timestep -----
 
 def step_house(
     ausgrid_pv_kw: float,
@@ -370,13 +357,7 @@ def step_house(
     cfg: NanogridConfig,
     dt_hours: float,
 ) -> HouseState:
-    """Assemble one house's complete provisional electrical state.
-
-    Order matters and encodes the energy flow: real PV and load first,
-    then the battery reacts to their difference, then the bus tie carries
-    whatever is left, and only then do the voltages and currents follow
-    from those powers. Nothing here is drawn at random.
-    """
+    """Assemble one house's complete provisional electrical state."""
 
     pv_power = pv_power_from_ausgrid(
         ausgrid_pv_kw, ausgrid_capacity_kwp, cfg.pv.capacity_kw
@@ -412,7 +393,6 @@ def step_house(
             pv_power, battery.discharge_kw, imported_kw, v_local
         ),
 
-        # Magnitude only; the direction is carried by tie_power's sign.
         tie_current=abs(current_from_power(tie.power_kw, v_local)),
         tie_power=tie.power_kw,
 
@@ -421,10 +401,110 @@ def step_house(
         deficit_power=max(-net_power, 0.0),
         battery_charge_power=battery.charge_kw,
         battery_discharge_power=battery.discharge_kw,
-        # Energy traded with the community over this interval, signed like
-        # tie_power: + exported kWh, - imported kWh.
         energy_exchange=tie.power_kw * dt_hours,
 
         curtailed_power=tie.curtailed_kw,
         unserved_power=tie.unserved_kw,
     )
+
+
+# =====================================================================
+# 3. MARL observation extraction
+# =====================================================================
+
+# Columns that identify a row rather than describe it.
+INDEX_COLUMNS = ["timestamp", "house_id"]
+
+
+def validate_features(features, available):
+    unknown = [f for f in features if f not in available]
+    if unknown:
+        raise ValueError(
+            f"observation.features refers to column(s) not in the dataset: "
+            f"{unknown}"
+        )
+    if not features:
+        raise ValueError("observation.features is empty")
+    return list(features)
+
+
+def observation_frame(dataset, features):
+    """Slice the observation columns (plus the index) out of the dataset."""
+    features = validate_features(features, dataset.columns)
+    return dataset[INDEX_COLUMNS + features].copy()
+
+
+def observation_shape(features, n_houses):
+    """(per-agent obs dim, joint obs dim) for the configured features."""
+    return len(features), len(features) * n_houses
+
+
+def observations_at(dataset, timestamp, features):
+    """Joint observation at one timestep: (n_houses, n_features) array."""
+    rows = dataset[dataset["timestamp"] == timestamp].sort_values("house_id")
+    return np.asarray(rows[list(features)], dtype=np.float32)
+
+
+# =====================================================================
+# 4. Community topology
+# =====================================================================
+
+def build_edges(n_nodes: int, topology: str) -> List[Tuple[int, int]]:
+    """Edges for the configured community layout.
+
+    chain : House0 - House1 - ... - HouseN-1
+    ring  : chain with the ends joined
+    star  : House0 at the centre, every other house connected to it
+    full  : every house connected to every other house
+    """
+
+    if n_nodes < 1:
+        raise ValueError("a community needs at least one house")
+
+    if topology == "chain":
+        return [(i, i + 1) for i in range(n_nodes - 1)]
+
+    if topology == "ring":
+        if n_nodes < 3:
+            return [(i, i + 1) for i in range(n_nodes - 1)]
+        return [(i, (i + 1) % n_nodes) for i in range(n_nodes)]
+
+    if topology == "star":
+        return [(0, i) for i in range(1, n_nodes)]
+
+    if topology == "full":
+        return [(i, j) for i in range(n_nodes) for j in range(i + 1, n_nodes)]
+
+    raise ValueError(
+        f"unknown topology {topology!r}; expected chain, ring, star or full"
+    )
+
+
+def build_topology(house_ids, customer_ids, topology: str) -> dict:
+    nodes = list(range(len(house_ids)))
+    return {
+        "provenance": "provisional_simulation",
+        "note": (
+            "Preliminary community layout. NOT derived from Ausgrid - the "
+            "source dataset has no network topology, and customer ids are "
+            "not spatial. Replace with the Simulink/hardware layout."
+        ),
+        "topology": topology,
+        "nodes": nodes,
+        "edges": [list(e) for e in build_edges(len(nodes), topology)],
+        "node_attributes": [
+            {"node": n, "house_id": h, "ausgrid_customer_id": c}
+            for n, h, c in zip(nodes, house_ids, customer_ids)
+        ],
+    }
+
+
+def save_topology(topology: dict, path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as fh:
+        json.dump(topology, fh, indent=2)
+
+
+def load_topology(path) -> dict:
+    with open(path) as fh:
+        return json.load(fh)
