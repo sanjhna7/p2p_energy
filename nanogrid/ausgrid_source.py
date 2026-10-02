@@ -77,7 +77,11 @@ def load_profiles(cfg: NanogridConfig) -> AusgridProfiles:
     if db_path.exists():
         try:
             return _load_from_sqlite(cfg, db_path)
-        except _NoData:
+        except (_NoData, Exception):
+            # _NoData: DB exists but has no usable readings.
+            # Other exceptions: DB exists but schema is missing/incompatible
+            # (e.g. no 'houses' table if ingest was never run).
+            # Either way, fall through to CSV.
             pass
 
     return _load_from_csv(cfg)
