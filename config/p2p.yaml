@@ -7,6 +7,9 @@
 #   SPEC      manufacturer datasheet or standard; `ref` names an entry in
 #             `references` below, and the loader rejects a SPEC without one
 #   SCENARIO  an experiment choice of ours, not a fact about the world
+#   PENDING   a placeholder until the EEE team's electrical specification
+#             arrives; must carry a `note`, may cite a `ref` for the
+#             placeholder, and `value: null` means "reported, not enforced"
 #
 # Values that come from the data (30-min interval, PV capacity, load and
 # generation) are read from data/processed/ and never repeated here.
@@ -21,6 +24,18 @@ references:
     citation: "BYD, Battery-Box Premium LVS datasheet, AU V2.2, 4 Jan 2023"
     url: "https://bydbatterybox.com/uploads/downloads/230318_BYD%20Battery-Box%20Premium%20LVS%20Datasheet_AU%20V2.2-64153555191fb.pdf"
     sha256: "c8af864c2b196c6ccdfb15dbf4b1f16e4adb4f1e689d185639a4d077853b5b9f"
+  aer_dmo_2026_27:
+    citation: "Australian Energy Regulator, Default market offer prices 2026-27: Final determination, May 2026, Figure 2.1"
+    url: "https://www.aer.gov.au/system/files/2026-05/AER%20-%20Final%20determination%20-%20Default%20market%20offer%202026%E2%80%9327.pdf"
+    sha256: "8c062224dbfc43e34ceae2486d671ee69c00daf0ab973bbefee8a94fd8903dd2"
+  ipart_fit_2026_27:
+    citation: "IPART, Fact Sheet: Solar feed-in tariff benchmark for 2026-27, 25 May 2026"
+    url: "https://www.ipart.nsw.gov.au/sites/default/files/cm9_documents/Fact-Sheet-All-day-solar-feed-in-tariff-benchmark-tariff-2026-27.PDF"
+    sha256: "08c16056822ccc40eeeeeb6958047c458a5277199b5de1ac2e09319076e51680"
+  etsi_en_300_132_3:
+    citation: "ETSI EN 300 132-3 V2.3.1 (2023-01), Power supply interface at the input to ICT equipment; Part 3: Up to 400 V DC, clauses 5.2-5.3"
+    url: "https://www.etsi.org/deliver/etsi_en/300100_300199/30013203/02.03.01_60/en_30013203v020301p.pdf"
+    sha256: "41138fef9b4e504c37bfe93e04e5c404605e3e7f5e111f6622154bdb1324ec0e"
 
 data:
   # Output of `python -m data_pipeline.build`.
@@ -76,3 +91,42 @@ battery:
   initial_soc:
     value: 0.5
     source: SCENARIO
+
+tariff:
+  # Flat-rate retail tariff in the Ausgrid area. Prices are 2026-27, applied
+  # to 2010-11 household profiles. The daily supply charge (166.2289 c/day)
+  # is paid by every house whatever it trades, so it is left out.
+  grid_buy_c_per_kwh:
+    value: 33.1372
+    source: SPEC
+    ref: aer_dmo_2026_27
+    note: "Ausgrid residential flat-rate DMO usage cap, incl. GST."
+  feed_in_c_per_kwh:
+    value: 4.95
+    source: SCENARIO
+    ref: ipart_fit_2026_27
+    note: "Midpoint of IPART's all-day benchmark range 3.4-6.5 c/kWh (GST not stated)."
+
+network:
+  # DC abstraction of the IEEE European LV feeder: same topology and cable
+  # resistance, two-wire DC (loop resistance = 2 x R1, see p2p/powerflow.py).
+  # The grid-tie converter at the transformer holds the bus voltage.
+  bus_voltage_v:
+    value: 380.0
+    source: PENDING
+    ref: etsi_en_300_132_3
+    note: "Placeholder: ETSI example normal operating voltage. Replace with the EEE community bus voltage."
+  voltage_min_v:
+    value: 260.0
+    source: PENDING
+    ref: etsi_en_300_132_3
+    note: "Placeholder: ETSI normal service range minimum. Replace with the EEE limit."
+  voltage_max_v:
+    value: 400.0
+    source: PENDING
+    ref: etsi_en_300_132_3
+    note: "Placeholder: ETSI normal service range maximum. Replace with the EEE limit."
+  line_current_max_a:
+    value: null
+    source: PENDING
+    note: "The IEEE feeder gives no cable ampacity. Currents are reported but not enforced until the EEE spec sets a limit."

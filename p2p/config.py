@@ -15,7 +15,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "p2p.yaml"
 
-SOURCES = {"REAL", "SPEC", "SCENARIO"}
+SOURCES = {"REAL", "SPEC", "SCENARIO", "PENDING"}
 
 
 @dataclass(frozen=True)
@@ -54,17 +54,38 @@ class BatteryConfig:
 
 
 @dataclass(frozen=True)
+class TariffConfig:
+    grid_buy_c_per_kwh: Param
+    feed_in_c_per_kwh: Param
+
+    @property
+    def mmr_c_per_kwh(self) -> float:
+        """Mid-market rate, (P_buy + P_feed-in) / 2 (slide 17)."""
+        return (self.grid_buy_c_per_kwh.value + self.feed_in_c_per_kwh.value) / 2
+
+
+@dataclass(frozen=True)
+class NetworkConfig:
+    bus_voltage_v: Param
+    voltage_min_v: Param
+    voltage_max_v: Param
+    line_current_max_a: Param
+
+
+@dataclass(frozen=True)
 class Config:
     processed_dir: Path
     scenario: ScenarioConfig
     battery: BatteryConfig
+    tariff: TariffConfig
+    network: NetworkConfig
     references: dict
     path: Path
 
     def provenance(self):
         """(name, value, source, citation) for every Param, for metadata and docs."""
         rows = []
-        for section in ("scenario", "battery"):
+        for section in ("scenario", "battery", "tariff", "network"):
             obj = getattr(self, section)
             for f in fields(obj):
                 p = getattr(obj, f.name)
@@ -94,6 +115,10 @@ def _param(data, where, references):
         raise ValueError(f"{where}: SPEC value needs a ref from `references`, got {p.ref!r}")
     if p.ref is not None and p.ref not in references:
         raise ValueError(f"{where}: unknown ref {p.ref!r}")
+    if p.source == "PENDING" and not p.note:
+        raise ValueError(f"{where}: PENDING value needs a note saying what replaces it")
+    if p.value is None and p.source != "PENDING":
+        raise ValueError(f"{where}: only a PENDING value may be null")
     return p
 
 
@@ -111,7 +136,7 @@ def load_config(path=DEFAULT_CONFIG_PATH) -> Config:
     with open(path) as fh:
         raw = yaml.safe_load(fh)
 
-    expected = {"references", "data", "scenario", "battery"}
+    expected = {"references", "data", "scenario", "battery", "tariff", "network"}
     if set(raw) != expected:
         raise ValueError(f"config sections must be {sorted(expected)}, got {sorted(raw)}")
 
@@ -121,6 +146,8 @@ def load_config(path=DEFAULT_CONFIG_PATH) -> Config:
         processed_dir=processed if processed.is_absolute() else PROJECT_ROOT / processed,
         scenario=_section(ScenarioConfig, raw["scenario"], "scenario", references),
         battery=_section(BatteryConfig, raw["battery"], "battery", references),
+        tariff=_section(TariffConfig, raw["tariff"], "tariff", references),
+        network=_section(NetworkConfig, raw["network"], "network", references),
         references=references,
         path=path,
     )
@@ -138,5 +165,11 @@ def _check(cfg: Config) -> None:
         raise ValueError("battery: initial_soc must lie in [0, 1]")
     if not b.operating_voltage_min_v.value < b.nominal_voltage_v.value < b.operating_voltage_max_v.value:
         raise ValueError("battery: nominal voltage must lie inside the operating range")
+    t = cfg.tariff
+    if not 0 <= t.feed_in_c_per_kwh.value < t.grid_buy_c_per_kwh.value:
+        raise ValueError("tariff: require 0 <= feed-in < grid buy price")
+    n = cfg.network
+    if not n.voltage_min_v.value < n.bus_voltage_v.value < n.voltage_max_v.value:
+        raise ValueError("network: bus voltage must lie inside [voltage_min_v, voltage_max_v]")
     if cfg.scenario.n_houses.value < 1 or cfg.scenario.days.value < 1:
         raise ValueError("scenario: n_houses and days must be >= 1")
