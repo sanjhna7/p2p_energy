@@ -1,0 +1,78 @@
+# =====================================================================
+# P2P energy configuration
+# =====================================================================
+#
+# Every number carries a `source`:
+#   REAL      measured data (the Ausgrid series themselves, not set here)
+#   SPEC      manufacturer datasheet or standard; `ref` names an entry in
+#             `references` below, and the loader rejects a SPEC without one
+#   SCENARIO  an experiment choice of ours, not a fact about the world
+#
+# Values that come from the data (30-min interval, PV capacity, load and
+# generation) are read from data/processed/ and never repeated here.
+# =====================================================================
+
+references:
+  byd_lvs_2024:
+    citation: "BYD, Battery-Box Premium LVS datasheet, EN V1.0, 26 Jun 2024"
+    url: "https://bydbatterybox.com/uploads/downloads/BBOX_LVS_Datasheet_EN_V1.0_240626_L-668f94bd814fd.pdf"
+    sha256: "e786fba9c62eba445c5dfc5d3a97f5d9ccf09273dd71ae75501e5de44ecef512"
+  byd_lvs_au_2023:
+    citation: "BYD, Battery-Box Premium LVS datasheet, AU V2.2, 4 Jan 2023"
+    url: "https://bydbatterybox.com/uploads/downloads/230318_BYD%20Battery-Box%20Premium%20LVS%20Datasheet_AU%20V2.2-64153555191fb.pdf"
+    sha256: "c8af864c2b196c6ccdfb15dbf4b1f16e4adb4f1e689d185639a4d077853b5b9f"
+
+data:
+  # Output of `python -m data_pipeline.build`.
+  processed_dir: "data/processed/mvp_ausgrid_eulv"
+
+scenario:
+  n_houses:
+    value: 10
+    source: SCENARIO
+    note: "Houses taken from the smallest feeder branch holding this many; 55 = whole feeder."
+  start:
+    value: "2011-01-01"
+    source: SCENARIO
+    note: "Australian summer, when the 2010-11 homes have the most PV surplus."
+  days:
+    value: 14
+    source: SCENARIO
+
+battery:
+  model: "BYD Battery-Box Premium LVS 4.0, one module per house"
+  usable_energy_kwh:
+    value: 4.0
+    source: SPEC
+    ref: byd_lvs_2024
+    note: "DC usable energy at 100% DOD, 0.2C, 25 C. The whole window is usable, so SoC runs 0..1."
+  nominal_voltage_v:
+    value: 51.2
+    source: SPEC
+    ref: byd_lvs_2024
+  operating_voltage_min_v:
+    value: 40.0
+    source: SPEC
+    ref: byd_lvs_2024
+  operating_voltage_max_v:
+    value: 57.6
+    source: SPEC
+    ref: byd_lvs_2024
+  max_continuous_current_a:
+    value: 65.0
+    source: SPEC
+    ref: byd_lvs_2024
+    note: "Max continuous output current, LVS 4.0."
+  rated_dc_power_kw:
+    value: 3.3
+    source: SPEC
+    ref: byd_lvs_au_2023
+    note: "LVS 4.0 column. The sheet gives one rating, so it limits both charge and discharge."
+  round_trip_efficiency:
+    value: 0.95
+    source: SPEC
+    ref: byd_lvs_2024
+    note: "Datasheet states >= 95%; the lower bound is used."
+  initial_soc:
+    value: 0.5
+    source: SCENARIO
