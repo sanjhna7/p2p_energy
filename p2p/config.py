@@ -85,6 +85,25 @@ class RewardConfig:
 
 
 @dataclass(frozen=True)
+class TrainingConfig:
+    start: Param
+    days: Param
+    episode_steps: Param
+    iterations: Param
+    episodes_per_iteration: Param
+    learning_rate: Param
+    gamma: Param
+    gae_lambda: Param
+    clip: Param
+    ppo_epochs: Param
+    minibatch_steps: Param
+    entropy_coef: Param
+    value_coef: Param
+    reward_scale: Param
+    seed: Param
+
+
+@dataclass(frozen=True)
 class Config:
     processed_dir: Path
     scenario: ScenarioConfig
@@ -92,13 +111,14 @@ class Config:
     tariff: TariffConfig
     network: NetworkConfig
     reward: RewardConfig
+    training: TrainingConfig
     references: dict
     path: Path
 
     def provenance(self):
         """(name, value, source, citation) for every Param, for metadata and docs."""
         rows = []
-        for section in ("scenario", "battery", "tariff", "network", "reward"):
+        for section in ("scenario", "battery", "tariff", "network", "reward", "training"):
             obj = getattr(self, section)
             for f in fields(obj):
                 p = getattr(obj, f.name)
@@ -149,7 +169,7 @@ def load_config(path=DEFAULT_CONFIG_PATH) -> Config:
     with open(path) as fh:
         raw = yaml.safe_load(fh)
 
-    expected = {"references", "data", "scenario", "battery", "tariff", "network", "reward"}
+    expected = {"references", "data", "scenario", "battery", "tariff", "network", "reward", "training"}
     if set(raw) != expected:
         raise ValueError(f"config sections must be {sorted(expected)}, got {sorted(raw)}")
 
@@ -162,6 +182,7 @@ def load_config(path=DEFAULT_CONFIG_PATH) -> Config:
         tariff=_section(TariffConfig, raw["tariff"], "tariff", references),
         network=_section(NetworkConfig, raw["network"], "network", references),
         reward=_section(RewardConfig, raw["reward"], "reward", references),
+        training=_section(TrainingConfig, raw["training"], "training", references),
         references=references,
         path=path,
     )

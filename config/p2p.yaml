@@ -174,3 +174,56 @@ reward:
     value: 0.01
     source: SCENARIO
     note: "Own: requested minus executed battery energy (above the rating, or more than the stored energy or headroom allows). Kept small: clipping is physically harmless."
+
+training:
+  # GAT-MARL training (p2p/marl.py). The model is trained on a window that
+  # does not overlap the evaluation window in `scenario`, so the reported
+  # results are on days the agents never saw.
+  start:
+    value: "2010-11-01"
+    source: SCENARIO
+    note: "Nov-Dec 2010: the two months before the Jan 2011 evaluation window."
+  days:
+    value: 61
+    source: SCENARIO
+  episode_steps:
+    value: 96
+    source: SCENARIO
+    note: "Two days of 30-min steps, starting at a random point of the training window."
+  iterations:
+    value: 150
+    source: SCENARIO
+  episodes_per_iteration:
+    value: 8
+    source: SCENARIO
+  learning_rate:
+    value: 0.0003
+    source: SCENARIO
+  gamma:
+    value: 0.99
+    source: SCENARIO
+  gae_lambda:
+    value: 0.95
+    source: SCENARIO
+  clip:
+    value: 0.2
+    source: SCENARIO
+  ppo_epochs:
+    value: 4
+    source: SCENARIO
+  minibatch_steps:
+    value: 128
+    source: SCENARIO
+  entropy_coef:
+    value: 0.001
+    source: SCENARIO
+  value_coef:
+    value: 0.5
+    source: SCENARIO
+  reward_scale:
+    value: 10.0
+    source: SCENARIO
+    note: "Rewards are a few cents per step; scaled up for stable PPO updates."
+  seed:
+    value: 0
+    source: SCENARIO
