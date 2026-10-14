@@ -1,7 +1,7 @@
 # data/
 
 Raw sources and the processed MVP dataset for the GAT-MARL P2P project.
-Why these sources were chosen: `docs/dataset_decision.md`. Full survey: `docs/dataset_research.md`.
+Why these sources were chosen: `docs/dataset_decision.md`. Citations: `docs/REFERENCES.md`.
 
 Nothing under `raw/` or `processed/` is committed (see `data/.gitignore`). Everything is re-downloadable and reproducible.
 
@@ -22,7 +22,8 @@ data/
 │   │   ├── European_LV_CSV/        Lines, LineCodes, Loads, Buscoords, Transformer, Source, load shapes
 │   │   ├── IEEE European LV Test Feeder - Draft.docx
 │   │   └── Solutions/              OpenDSS + GridLAB-D reference results (AC)
-│   └── p2p_energy.db               (older SQLite DB from ingest.py, untouched)
+│   ├── Solar home 2010-2011.csv    second copy of the 2010-11 CSV; no code reads it
+│   └── p2p_energy.db               legacy SQLite copy of the 2010-11 data; no code reads it
 └── processed/
     └── mvp_ausgrid_eulv/           output of data_pipeline.build
 ```
@@ -53,7 +54,7 @@ SHA-256 of the files we used (downloaded 2026-09-15):
 | `Solar home 2010-2011.csv` (from the zip) | `2fc1f615e22fbd8ec350cdb19f7465d3a038453fc2ffd19473ef1bd38fd28289` |
 | `European_LV_Test_Feeder_v2.zip` | `47fcb8188d958426cdeae225e3b82591c55a97e70e0e65dc6b7ce8e560446ddc` |
 
-The `Solar home 2010-2011.csv` at the repo root is the same data. It differs from the archive copy only by line endings (LF vs CRLF): after stripping `\r` both hash to `94e8a6a2…f353`.
+The loose `data/raw/Solar home 2010-2011.csv` is the same data. It differs from the archive copy only by line endings (LF vs CRLF): after stripping `\r` both hash to `94e8a6a2…f353`.
 
 ## 2. Build
 
@@ -130,8 +131,7 @@ The pipeline reproduces Ausgrid's own summary table for 2010-11 over all 300 cus
 
 ## 5. Caveats
 
-- **Known units issue in the older `ingest.py`:** it stores Ausgrid kWh-per-half-hour values in columns named `solar_kw` / `load_kw` without multiplying by 2. Every power in `p2p_energy.db` is therefore half the true average kW. The new pipeline converts correctly. `ingest.py` was left unchanged.
-- Sydney households on a UK-derived feeder: the pairing is ours. See `docs/dataset_decision.md` §6.
+- Sydney households on a UK-derived feeder: the pairing is ours. See `docs/dataset_decision.md`, "Our adaptations".
 - 2010-11 PV systems are small (mean 1.57 kWp for the 55 sampled homes). Surplus exists in about 20% of house-intervals.
 - Dead-end cable stubs with no load (205 segments, 245.8 m) are pruned from `edges.csv`. `edges_full.csv` keeps them.
 - DST days are left as recorded (Ausgrid gives 48 columns every day).

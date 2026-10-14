@@ -1,120 +1,75 @@
-# P2P Energy — provisional MARL development dataset
+# P2P Energy Distribution using GNN and MARL — baseline code
 
-Builds a **temporary but physically consistent** dataset for developing
-and testing the MARL algorithm, while the Simulink/hardware model is
-still being finished.
+Real household data on a real low-voltage network, for a topology-aware
+GAT-MARL framework for peer-to-peer energy sharing.
 
-The temporal behaviour is **real** — household PV generation and
-consumption from the Ausgrid Solar Home Electricity Dataset (2010–2011).
-The electrical variables that dataset never contained — voltages,
-currents, battery state of charge, bus-tie power — come from a simple
-nanogrid model and are labelled `provisional_simulation` throughout.
-**They will be replaced by Simulink/hardware outputs.** There is no
-random number generator anywhere in `nanogrid/`.
+- **Household load and rooftop PV:** real half-hourly measurements from
+  the Ausgrid Solar Home Electricity Data (2010–11).
+- **Network:** the IEEE European LV Test Feeder, 55 customer connections.
+- **Battery:** BYD Battery-Box Premium LVS 4.0, from the manufacturer datasheet.
 
-Full detail, including the per-column provenance table and the research
-statement that must accompany any publication:
-**[`docs/PROVISIONAL_DATASET.md`](docs/PROVISIONAL_DATASET.md)**.
+Every number has a stated source. See `docs/dataset_decision.md` for what is
+real and what is our adaptation, and `docs/REFERENCES.md` for citations.
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
-python build_marl_dataset.py          # generate + validate + plot
+# download raw data: see data/README.md, section 1
+python -m data_pipeline.build                 # raw -> data/processed/ (about 15 s)
+python -m unittest discover -s tests -t .     # 17 tests, incl. published-fact checks
 ```
 
-Other entry points:
+```python
+from p2p.config import load_config
+from p2p.scenario import load_scenario
 
-```bash
-python -m nanogrid.build_dataset      # generate only
-python -m nanogrid.validate           # validate an existing dataset
-python -m nanogrid.plots              # re-render the plots
-#  ... --config path/to/other.yaml    # any of them, alternative config
+cfg = load_config()              # config/p2p.yaml
+sc = load_scenario(cfg)          # 10 houses on one feeder branch, 1-14 Jan 2011
+sc.load_kw, sc.pv_kw             # (T, n_houses), real kW
+sc.edge_index                    # feeder subgraph for the GAT
 ```
 
 ## Layout
 
 ```
-build_marl_dataset.py        Entry point: generate → validate → plot
-config/
-  nanogrid_config.yaml       EVERY assumption. No magic numbers in Python.
-nanogrid/                    The experiment
-  config.py                  Typed config loader; rejects unknown keys
-  ausgrid_source.py          Real Ausgrid data ONLY — no modelling here
-  battery_model.py           Shared battery charge/discharge equations
-  models.py                  PV, load, battery, local bus, tie, community
-  build_dataset.py           Time loop; carries SoC across timesteps
-  observation.py             The single source of truth for obs shape
-  topology.py                Community graph → topology.json
-  provenance.py              ausgrid_derived vs provisional_simulation
-  validate.py                25 consistency checks
-  plots.py                   9 visual checks
-data/
-  raw/                       Inputs: Ausgrid CSV + p2p_energy.db
-  processed/                 Generated dataset, metadata, topology, plots/
+data_pipeline/          OFFLINE, run once: raw -> data/processed/
+  ausgrid.py            Ausgrid CSV -> cleaned per-house kW series
+  feeder.py             IEEE European LV feeder -> 110-node graph
+  build.py              joins them; writes manifest with hashes
+p2p/                    ONLINE: reads only data/processed/
+  config.py             typed config; every value carries REAL/SPEC/SCENARIO
+  scenario.py           picks houses by feeder branch + date window
+  battery.py            battery energy model (physics only, no policy)
+config/p2p.yaml         all numbers, with sources and references
+tests/                  unit tests + checks against published source facts
 docs/
-  PROVISIONAL_DATASET.md     Model, conventions, provenance, hand-off
-removedfornnow/              Earlier SQLite pipeline — see its README
+  dataset_decision.md   why these sources; every adaptation of ours
+  REFERENCES.md         verified citations
+data/                   raw/ and processed/ (not committed; see data/README.md)
 ```
 
-## Architecture modelled
+Data flows one way: `data/raw` → `data_pipeline` → `data/processed` → `p2p`.
 
-```
-                 PV
-                  |
-             Local DC Bus
-            /             \
-       Battery          DC Load
-            \             /
-         Bus Tie Converter
-                  |
-         Community DC Bus
-```
+## Config provenance
 
-Each house is one MARL agent. The community DC bus is shared — one
-voltage per timestep, observed identically by every house.
+Each value in `config/p2p.yaml` is written as
 
-## Outputs
-
-| File | Contents |
-| --- | --- |
-| `data/processed/marl_simulation_dataset.csv` | Complete per-house simulation state |
-| `data/processed/agent_observations.csv` | The MARL observation vectors |
-| `data/processed/community_state.csv` | Shared community bus, network loss, grid slack |
-| `data/processed/topology.json` | Community graph (stored apart from the time series) |
-| `data/processed/dataset_metadata.json` | Provenance, shapes, and the exact config used |
-| `data/processed/plots/` | 9 visual-validation figures |
-
-## Observation
-
-```
-[pv_power, load_power, battery_soc,
- local_bus_voltage, tie_power, community_bus_voltage]
+```yaml
+usable_energy_kwh:
+  value: 4.0
+  source: SPEC          # REAL | SPEC | SCENARIO
+  ref: byd_lvs_2024     # required for SPEC
 ```
 
-To change it, edit `observation.features` in
-`config/nanogrid_config.yaml` — and nothing else.
+The loader rejects bare numbers, unknown sources, and SPEC values without
+a reference.
 
 ## Sign conventions
 
 | Quantity | Convention |
 | --- | --- |
-| `net_power` | `pv_power - load_power` |
-| `battery_power` | **> 0 discharging**, < 0 charging |
-| `tie_power` | **> 0 house → community**, < 0 community → house |
-| `tie_current` | magnitude only; direction lives in `tie_power` |
+| `net_power_kw` | `pv − load`; > 0 surplus, < 0 deficit |
+| battery `power_kw` | > 0 discharging, < 0 charging |
 
 Power in kW, energy in kWh, voltage in V, current in A.
-
-## Hand-off to the hardware team
-
-The swap-in point is `nanogrid/models.py::step_house`, and only that:
-
-```
-(ausgrid_pv_kw, ausgrid_load_kw, ausgrid_capacity_kwp, prev_soc, cfg, dt)
-    -> HouseState
-```
-
-Replace its body with the Simulink outputs, flip the affected labels in
-`nanogrid/provenance.py`, and rerun. The observation spec, topology and
-all 25 validation checks keep working unchanged.
