@@ -23,3 +23,6 @@ data/processed/
 
 # Logs
 *.log
+
+# Experiment outputs (regenerate with python -m p2p.run)
+results/
