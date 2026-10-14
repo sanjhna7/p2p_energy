@@ -63,4 +63,28 @@ was confirmed via a secondary source, PowerLogic, "LV Voltage Range and
 Implications", <https://www.powerlogic.com.au/lv-voltage-range-and-implications/>
 (checked 2026-10-14). Cite the standard itself in formal reports.
 
-Full hashes are in `config/p2p.yaml` (R5, R6) and `data/README.md` (R1, R3).
+## Prices
+
+**[R8] AER, Default market offer prices 2026–27: Final determination, May 2026.**
+Figure 2.1: Ausgrid residential flat-rate DMO tariff caps, usage
+33.1372 c/kWh, supply 166.2289 c/day; "All tariff caps include GST".
+<https://www.aer.gov.au/system/files/2026-05/AER%20-%20Final%20determination%20-%20Default%20market%20offer%202026%E2%80%9327.pdf>,
+SHA-256 `8c062224…03dd2`. CC BY 4.0.
+
+**[R9] IPART, Fact Sheet: Solar feed-in tariff benchmark for 2026-27, 25 May 2026.**
+All-day benchmark 3.4 to 6.5 c/kWh, 1 Jul 2026 – 30 Jun 2027. GST not stated.
+<https://www.ipart.nsw.gov.au/sites/default/files/cm9_documents/Fact-Sheet-All-day-solar-feed-in-tariff-benchmark-tariff-2026-27.PDF>,
+SHA-256 `08c16056…51680`.
+
+## Placeholders pending the EEE specification
+
+**[R10] ETSI EN 300 132-3 V2.3.1 (2023-01), Power supply interface at the
+input to ICT equipment; Part 3: Up to 400 V DC.** Clause 5.2: normal
+service voltage range 260–400 V DC. Clause 5.3 note 1: 354 V and 380 V
+as example normal operating voltages. Used only as a placeholder for the
+community DC bus until the EEE team's values arrive.
+<https://www.etsi.org/deliver/etsi_en/300100_300199/30013203/02.03.01_60/en_30013203v020301p.pdf>,
+SHA-256 `41138fef…1ec0e`.
+
+Full hashes are in `config/p2p.yaml` (R5, R6, R8–R10) and `data/README.md` (R1, R3).
+Local copies of R5, R6, R8–R10 are kept in `data/raw/references/` (not committed).

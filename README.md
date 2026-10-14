@@ -7,6 +7,10 @@ GAT-MARL framework for peer-to-peer energy sharing.
   the Ausgrid Solar Home Electricity Data (2010–11).
 - **Network:** the IEEE European LV Test Feeder, 55 customer connections.
 - **Battery:** BYD Battery-Box Premium LVS 4.0, from the manufacturer datasheet.
+- **Prices:** Ausgrid flat-rate retail cap (AER DMO 2026–27) and IPART's
+  2026–27 feed-in benchmark; P2P trades at the mid-market rate.
+- **DC network:** the feeder's topology and cable resistance as a two-wire
+  DC network. Bus voltage and limits are PENDING the EEE specification.
 
 Every number has a stated source. See `docs/dataset_decision.md` for what is
 real and what is our adaptation, and `docs/REFERENCES.md` for citations.
@@ -17,7 +21,8 @@ real and what is our adaptation, and `docs/REFERENCES.md` for citations.
 pip install -r requirements.txt
 # download raw data: see data/README.md, section 1
 python -m data_pipeline.build                 # raw -> data/processed/ (about 15 s)
-python -m unittest discover -s tests -t .     # 17 tests, incl. published-fact checks
+python -m unittest discover -s tests -t .     # 28 tests, incl. published-fact checks
+python -m p2p.run                             # baselines -> results/ (about 5 s)
 ```
 
 ```python
@@ -38,9 +43,16 @@ data_pipeline/          OFFLINE, run once: raw -> data/processed/
   feeder.py             IEEE European LV feeder -> 110-node graph
   build.py              joins them; writes manifest with hashes
 p2p/                    ONLINE: reads only data/processed/
-  config.py             typed config; every value carries REAL/SPEC/SCENARIO
+  config.py             typed config; every value carries REAL/SPEC/SCENARIO/PENDING
   scenario.py           picks houses by feeder branch + date window
   battery.py            battery energy model (physics only, no policy)
+  market.py             P2P matching at the MMR, remainder with the grid
+  powerflow.py          DC power flow (backward/forward sweep) on the feeder
+  safety.py             voltage / current / convergence checks
+  env.py                closed loop: battery -> safety -> market, logged
+  baselines.py          grid_only, battery_only, rule_p2p
+  metrics.py            slide-27 measures from a log
+  run.py                runs the baselines, writes results/
 config/p2p.yaml         all numbers, with sources and references
 tests/                  unit tests + checks against published source facts
 docs/
@@ -58,7 +70,7 @@ Each value in `config/p2p.yaml` is written as
 ```yaml
 usable_energy_kwh:
   value: 4.0
-  source: SPEC          # REAL | SPEC | SCENARIO
+  source: SPEC          # REAL | SPEC | SCENARIO | PENDING
   ref: byd_lvs_2024     # required for SPEC
 ```
 
@@ -71,5 +83,8 @@ a reference.
 | --- | --- |
 | `net_power_kw` | `pv − load`; > 0 surplus, < 0 deficit |
 | battery `power_kw` | > 0 discharging, < 0 charging |
+| residual / injection | > 0 exported into the network, < 0 drawn |
+| edge current | > 0 away from the transformer |
+| grid power | > 0 the grid supplies the community |
 
 Power in kW, energy in kWh, voltage in V, current in A.
