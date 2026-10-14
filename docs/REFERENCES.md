@@ -54,4 +54,13 @@ SHA-256 `c8af864c…b5b9f`.
 Same figures as R5, plus rated DC power 3.3 kW for the LVS 4.0
 (R5 does not list rated power).
 
+## Standards
+
+**[R7] AS IEC 60038, Standard voltages (Standards Australia).**
+Sets the Australian nominal low-voltage supply at 230/400 V.
+The standard is paywalled and was not read directly; the nominal value
+was confirmed via a secondary source, PowerLogic, "LV Voltage Range and
+Implications", <https://www.powerlogic.com.au/lv-voltage-range-and-implications/>
+(checked 2026-10-14). Cite the standard itself in formal reports.
+
 Full hashes are in `config/p2p.yaml` (R5, R6) and `data/README.md` (R1, R3).

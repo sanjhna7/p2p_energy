@@ -12,7 +12,7 @@ Outputs (in --out):
     ausgrid_quality_report.csv every customer, checks and exclusion reasons
     manifest.json              sources, file hashes, parameters, counts
 
-The pairing of a Sydney household with a UK-derived feeder position is OUR
+The pairing of a Sydney household with a European benchmark feeder position is OUR
 adaptation. It is not in either source and must be described as such.
 """
 

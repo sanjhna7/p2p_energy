@@ -131,7 +131,7 @@ The pipeline reproduces Ausgrid's own summary table for 2010-11 over all 300 cus
 
 ## 5. Caveats
 
-- Sydney households on a UK-derived feeder: the pairing is ours. See `docs/dataset_decision.md`, "Our adaptations".
+- Sydney households on a European benchmark feeder: the pairing is ours. See `docs/dataset_decision.md`, "Our adaptations".
 - 2010-11 PV systems are small (mean 1.57 kWp for the 55 sampled homes). Surplus exists in about 20% of house-intervals.
 - Dead-end cable stubs with no load (205 segments, 245.8 m) are pruned from `edges.csv`. `edges_full.csv` keeps them.
 - DST days are left as recorded (Ausgrid gives 48 columns every day).

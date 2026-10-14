@@ -46,6 +46,36 @@ measurements, and any DC quantity derived from them is a model output.
 - Cables are strongly resistive (median R1/X1 ≈ 13), which suits a later
   DC abstraction, but it is an AC feeder and is kept as published here.
 
+### Why this feeder
+
+1. **One load is one house.** The widely used IEEE feeders (13, 34, 123
+   bus) are North American medium-voltage feeders whose loads each stand
+   for many customers. This feeder models 55 individual residential
+   connections, which is what one-agent-per-house needs.
+2. **It matches Australian low-voltage practice.** Australian supply is
+   nominally 230/400 V [R7] at 50 Hz, the same as this 416 V, 50 Hz
+   European-style feeder, and in both a single distribution transformer
+   feeds many customers over a radial LV cable network. North American
+   LV practice (120/240 V split-phase, 60 Hz) does not match the Ausgrid
+   homes.
+3. **Everything needed is published:** cable lengths and impedances,
+   each customer's bus and phase, bus coordinates, and the transformer.
+4. **Official reference results** (OpenDSS and GridLAB-D, in
+   `Solutions/`) allow a power-flow model to be validated against the
+   benchmark before it is adapted.
+5. **Recognised and open.** It is documented in [R4] and free to use,
+   so results are reproducible and comparable.
+
+### Its limits
+
+- It is not a Sydney network. No public Australian LV feeder with
+  per-house connections is used as a standard benchmark; the pairing is
+  stated as our adaptation.
+- It is AC three-phase. We keep the topology and cable resistance and
+  ignore phase allocation; any DC quantity is a model output.
+- It is one feeder. Claims about unseen topologies need further networks
+  (e.g. ENWL LV or SimBench, as listed in the Phase 1 dataset review).
+
 ## Our adaptations
 
 None of these are in either source. Each must be stated wherever the
@@ -59,7 +89,7 @@ data is used.
    leaves 269 of 300 customers. These rules are ours, not Ausgrid's.
 3. **Pairing.** 55 clean customers are sampled with a fixed seed and
    assigned to feeder loads LOAD1..LOAD55. A Sydney household on a
-   UK-derived feeder position is our construction.
+   European benchmark feeder position is our construction.
 4. **Graph reduction.** Cable stubs with no load are pruned and chains of
    pass-through buses are merged, summing length, R and X (exact for
    series impedances). Result: 110 nodes (1 transformer, 55 houses,
@@ -76,7 +106,9 @@ data is used.
 > Household load and rooftop PV profiles are real half-hourly measurements
 > from the Ausgrid Solar Home Electricity Data [R1, R2]. Households are
 > placed on the 55 customer connections of the IEEE European LV Test
-> Feeder [R3, R4]; this pairing, the cleaning rules and the network
+> Feeder [R3, R4], chosen because it models individual residential
+> connections and matches Australian 230/400 V, 50 Hz low-voltage
+> practice [R7]; this pairing, the cleaning rules and the network
 > reduction are our adaptations. Battery parameters are taken from the
 > BYD Battery-Box Premium LVS datasheet [R5, R6]. No voltage, current or
 > battery value is measured; all such quantities are model outputs.
