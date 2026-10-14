@@ -24,7 +24,7 @@ data/
 │   │   └── Solutions/              OpenDSS + GridLAB-D reference results (AC)
 │   └── p2p_energy.db               (older SQLite DB from ingest.py, untouched)
 └── processed/
-    └── mvp_ausgrid_eulv/           output of data_pipeline.build_mvp_dataset
+    └── mvp_ausgrid_eulv/           output of data_pipeline.build
 ```
 
 ## 1. Download
@@ -58,9 +58,9 @@ The `Solar home 2010-2011.csv` at the repo root is the same data. It differs fro
 ## 2. Build
 
 ```bash
-.venv/bin/python -m data_pipeline.build_mvp_dataset
+.venv/bin/python -m data_pipeline.build
 # other year:
-.venv/bin/python -m data_pipeline.build_mvp_dataset \
+.venv/bin/python -m data_pipeline.build \
     --ausgrid-csv "data/raw/ausgrid_solar_home/Solar home 2011-2012.csv" \
     --out data/processed/mvp_ausgrid_eulv_2011
 ```

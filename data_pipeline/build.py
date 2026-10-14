@@ -1,8 +1,8 @@
 """Build the MVP dataset: real Ausgrid household load/PV mapped onto the
 55 residential connection points of the IEEE European LV Test Feeder.
 
-    python -m data_pipeline.build_mvp_dataset
-    python -m data_pipeline.build_mvp_dataset --ausgrid-csv "data/raw/ausgrid_solar_home/Solar home 2011-2012.csv"
+    python -m data_pipeline.build
+    python -m data_pipeline.build --ausgrid-csv "data/raw/ausgrid_solar_home/Solar home 2011-2012.csv"
 
 Outputs (in --out):
     houses_timeseries.csv.gz   per house, per 30-min interval
@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from data_pipeline import ausgrid, eulv_network
+from data_pipeline import ausgrid, feeder
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_AUSGRID = ROOT / "data/raw/ausgrid_solar_home/Solar home 2010-2011.csv"
@@ -66,9 +66,9 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
 
     print(f"Reading feeder: {args.feeder_dir}")
-    lines, loads, coords, _, root_bus = eulv_network.read_feeder(args.feeder_dir)
-    active_lines = eulv_network.prune_dead_ends(lines, loads, root_bus)
-    nodes, edges = eulv_network.reduce_feeder(active_lines, loads, coords, root_bus)
+    lines, loads, coords, _, root_bus = feeder.read_feeder(args.feeder_dir)
+    active_lines = feeder.prune_dead_ends(lines, loads, root_bus)
+    nodes, edges = feeder.reduce_feeder(active_lines, loads, coords, root_bus)
     houses = nodes[nodes["node_type"] == "house"].copy()
     houses["load_number"] = houses["load_name"].str.replace("LOAD", "").astype(int)
     houses = houses.sort_values("load_number")
@@ -122,7 +122,7 @@ def main():
     mapping.to_csv(args.out / "house_mapping.csv", index=False)
     nodes.to_csv(args.out / "nodes.csv", index=False)
     edges.to_csv(args.out / "edges.csv", index=False)
-    eulv_network.full_edges(lines).to_csv(args.out / "edges_full.csv", index=False)
+    feeder.full_edges(lines).to_csv(args.out / "edges_full.csv", index=False)
     report.to_csv(args.out / "ausgrid_quality_report.csv")
 
     feeder_files = ["Lines.csv", "LineCodes.csv", "Loads.csv", "Buscoords.csv", "Transformer.csv", "Source.csv"]
