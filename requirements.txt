@@ -1,6 +1,3 @@
 pandas
 numpy
-matplotlib
 PyYAML
-torch
-torch-geometric

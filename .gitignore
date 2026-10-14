@@ -19,7 +19,6 @@ venv/
 Thumbs.db
 
 # Generated data files
-synthetic_dc_microgrid_data.csv
 data/processed/
 
 # Logs
