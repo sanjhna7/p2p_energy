@@ -1,0 +1,4 @@
+# Raw downloads and generated outputs are large and reproducible; keep only docs.
+raw/*
+processed/*
+!README.md
