@@ -21,8 +21,9 @@ real and what is our adaptation, and `docs/REFERENCES.md` for citations.
 pip install -r requirements.txt
 # download raw data: see data/README.md, section 1
 python -m data_pipeline.build                 # raw -> data/processed/ (about 15 s)
-python -m unittest discover -s tests -t .     # 28 tests, incl. published-fact checks
+python -m unittest discover -s tests -t .     # 36 tests, incl. published-fact checks
 python -m p2p.run                             # baselines -> results/ (about 5 s)
+python -m p2p.marl                            # train GAT-MARL, evaluate vs baselines (about 20 min, CPU)
 ```
 
 ```python
@@ -52,7 +53,10 @@ p2p/                    ONLINE: reads only data/processed/
   env.py                closed loop: battery -> safety -> market, logged
   baselines.py          grid_only, battery_only, rule_p2p
   metrics.py            slide-27 measures from a log
+  reward.py             -cost minus penalties for unsafe or impossible proposals
   run.py                runs the baselines, writes results/
+  gat.py                GAT encoder on the feeder graph + actor-critic
+  marl.py               shared-parameter PPO; trains Nov-Dec 2010, evaluates Jan 2011
 config/p2p.yaml         all numbers, with sources and references
 tests/                  unit tests + checks against published source facts
 docs/
@@ -88,3 +92,22 @@ a reference.
 | grid power | > 0 the grid supplies the community |
 
 Power in kW, energy in kWh, voltage in V, current in A.
+
+## Reward
+
+`reward_i = -cost_i - penalties`, with every penalty evaluated on the
+**proposed** action, before the safety layer blocks it:
+
+| Term | Scope | Measures |
+| --- | --- | --- |
+| own voltage | house | volts outside the band at its own node |
+| infeasible request | house | requested minus executed battery energy |
+| network voltage | shared | volts outside the band over all nodes |
+| line overload | shared | amps above the cable limit (inactive while PENDING) |
+| grid-tie overload | shared | kW above the grid-tie rating |
+| collapse | shared | power flow does not converge |
+| blocked | shared | safety layer replaced the action |
+
+Weights are in `config/p2p.yaml` under `reward` (tuning values, SCENARIO).
+Policies are compared on cost and network measures; reward is the training
+signal.
