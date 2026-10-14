@@ -3,3 +3,4 @@ numpy
 PyYAML
 torch
 torch-geometric
+matplotlib
