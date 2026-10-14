@@ -37,4 +37,4 @@ def run(policy_name: str, sc: Scenario, cfg: Config) -> dict:
     obs = env.reset()
     while not env.done:
         obs, _, _, _ = env.step(policy(obs))
-    return env.log.as_arrays()
+    return env.log_arrays()

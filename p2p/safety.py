@@ -5,6 +5,7 @@ the DC power flow and checked against the network limits:
 
   - every node voltage within [voltage_min_v, voltage_max_v]
   - every cable current within line_current_max_a, when that limit is set
+  - grid-tie power within grid_tie_max_kw, in either direction
   - the power flow converges (no voltage collapse)
 
 Battery limits need no check here: p2p/battery.py cannot exceed them.
@@ -30,10 +31,28 @@ class Limits:
     v_min: float
     v_max: float
     i_max: Optional[float]   # None = reported, not enforced
+    grid_max_kw: float
 
     @classmethod
     def from_config(cls, cfg: NetworkConfig) -> "Limits":
-        return cls(cfg.voltage_min_v.value, cfg.voltage_max_v.value, cfg.line_current_max_a.value)
+        return cls(cfg.voltage_min_v.value, cfg.voltage_max_v.value,
+                   cfg.line_current_max_a.value, cfg.grid_tie_max_kw.value)
+
+
+def voltage_excess(v, limits: Limits) -> np.ndarray:
+    """Volts outside the band at each node (0 inside it)."""
+    return np.maximum(limits.v_min - v, 0.0) + np.maximum(v - limits.v_max, 0.0)
+
+
+def line_excess(i_edge, limits: Limits) -> np.ndarray:
+    """Amps above the cable limit on each edge (0 while no limit is set)."""
+    if limits.i_max is None:
+        return np.zeros_like(i_edge)
+    return np.maximum(np.abs(i_edge) - limits.i_max, 0.0)
+
+
+def grid_excess(grid_kw: float, limits: Limits) -> float:
+    return max(abs(grid_kw) - limits.grid_max_kw, 0.0)
 
 
 def violations(flow: FlowResult, limits: Limits) -> list:
@@ -45,6 +64,8 @@ def violations(flow: FlowResult, limits: Limits) -> list:
         found.append("undervoltage")
     if flow.v_node.max() > limits.v_max:
         found.append("overvoltage")
-    if limits.i_max is not None and np.abs(flow.i_edge).max() > limits.i_max:
+    if line_excess(flow.i_edge, limits).any():
         found.append("overcurrent")
+    if grid_excess(flow.grid_kw, limits) > 0:
+        found.append("grid_overload")
     return found

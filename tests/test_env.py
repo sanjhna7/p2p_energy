@@ -51,3 +51,25 @@ class EnvTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE_DATA, "run `python -m data_pipeline.build` first")
+class RewardTest(unittest.TestCase):
+    def test_reward_is_minus_cost_minus_penalty(self):
+        cfg = _cfg()
+        log = baselines.run("rule_p2p", load_scenario(cfg), cfg)
+        np.testing.assert_allclose(log["reward"], -log["cost_aud"] - log["penalty_aud"])
+
+    def test_idle_safe_policy_has_no_penalty(self):
+        cfg = _cfg()
+        log = baselines.run("grid_only", load_scenario(cfg), cfg)
+        self.assertEqual(float(np.abs(log["penalty_aud"]).sum()), 0.0)
+
+    def test_blocked_proposals_are_penalised(self):
+        cfg = _cfg(voltage_min_v=379.999, voltage_max_v=380.001)
+        log = baselines.run("rule_p2p", load_scenario(cfg), cfg)
+        blocked = log["blocked"]
+        w = cfg.reward.blocked_aud.value
+        self.assertTrue(np.all(log["penalty_aud"][blocked] >= w))
+        # Penalties reflect the proposal, so they exceed the blocked fee alone.
+        self.assertTrue(np.any(log["penalty_aud"][blocked] > w))

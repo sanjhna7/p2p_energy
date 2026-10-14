@@ -31,6 +31,8 @@ def summarise(log: dict, dt_hours: float, baseline: dict = None) -> dict:
         "self_sufficiency": 1 - e("grid_import_kw") / load,
         "pv_local_use": 1 - e("grid_export_kw") / pv if pv > 0 else float("nan"),
         "cost_aud": float(log["cost_aud"].sum()),
+        "penalty_aud": float(log["penalty_aud"].sum()),
+        "reward": float(log["reward"].sum()),
         # Network figures cover converged steps only; see non_converged_steps.
         "network_loss_kwh": float(np.nansum(log["loss_kw"]) * dt_hours),
         "v_min": float(np.nanmin(log["v_min"])) if log["converged"].any() else float("nan"),

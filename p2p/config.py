@@ -70,6 +70,18 @@ class NetworkConfig:
     voltage_min_v: Param
     voltage_max_v: Param
     line_current_max_a: Param
+    grid_tie_max_kw: Param
+
+
+@dataclass(frozen=True)
+class RewardConfig:
+    own_voltage_aud_per_v: Param
+    network_voltage_aud_per_v: Param
+    line_overload_aud_per_a: Param
+    grid_overload_aud_per_kw: Param
+    collapse_aud: Param
+    blocked_aud: Param
+    infeasible_aud_per_kwh: Param
 
 
 @dataclass(frozen=True)
@@ -79,13 +91,14 @@ class Config:
     battery: BatteryConfig
     tariff: TariffConfig
     network: NetworkConfig
+    reward: RewardConfig
     references: dict
     path: Path
 
     def provenance(self):
         """(name, value, source, citation) for every Param, for metadata and docs."""
         rows = []
-        for section in ("scenario", "battery", "tariff", "network"):
+        for section in ("scenario", "battery", "tariff", "network", "reward"):
             obj = getattr(self, section)
             for f in fields(obj):
                 p = getattr(obj, f.name)
@@ -136,7 +149,7 @@ def load_config(path=DEFAULT_CONFIG_PATH) -> Config:
     with open(path) as fh:
         raw = yaml.safe_load(fh)
 
-    expected = {"references", "data", "scenario", "battery", "tariff", "network"}
+    expected = {"references", "data", "scenario", "battery", "tariff", "network", "reward"}
     if set(raw) != expected:
         raise ValueError(f"config sections must be {sorted(expected)}, got {sorted(raw)}")
 
@@ -148,6 +161,7 @@ def load_config(path=DEFAULT_CONFIG_PATH) -> Config:
         battery=_section(BatteryConfig, raw["battery"], "battery", references),
         tariff=_section(TariffConfig, raw["tariff"], "tariff", references),
         network=_section(NetworkConfig, raw["network"], "network", references),
+        reward=_section(RewardConfig, raw["reward"], "reward", references),
         references=references,
         path=path,
     )
@@ -171,5 +185,8 @@ def _check(cfg: Config) -> None:
     n = cfg.network
     if not n.voltage_min_v.value < n.bus_voltage_v.value < n.voltage_max_v.value:
         raise ValueError("network: bus voltage must lie inside [voltage_min_v, voltage_max_v]")
+    for f in fields(cfg.reward):
+        if getattr(cfg.reward, f.name).value < 0:
+            raise ValueError(f"reward.{f.name}: penalty weights must be >= 0")
     if cfg.scenario.n_houses.value < 1 or cfg.scenario.days.value < 1:
         raise ValueError("scenario: n_houses and days must be >= 1")

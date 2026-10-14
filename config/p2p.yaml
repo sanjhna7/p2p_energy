@@ -32,6 +32,10 @@ references:
     citation: "IPART, Fact Sheet: Solar feed-in tariff benchmark for 2026-27, 25 May 2026"
     url: "https://www.ipart.nsw.gov.au/sites/default/files/cm9_documents/Fact-Sheet-All-day-solar-feed-in-tariff-benchmark-tariff-2026-27.PDF"
     sha256: "08c16056822ccc40eeeeeb6958047c458a5277199b5de1ac2e09319076e51680"
+  ieee_eulv_2015:
+    citation: "IEEE PES Test Feeders WG, European LV Test Feeder (2015), Transformer.csv: TR1 11/0.416 kV, 0.8 MVA"
+    url: "https://cmte.ieee.org/pes-testfeeders/wp-content/uploads/sites/167/2017/08/European_LV_Test_Feeder_v2.zip"
+    sha256: "47fcb8188d958426cdeae225e3b82591c55a97e70e0e65dc6b7ce8e560446ddc"
   etsi_en_300_132_3:
     citation: "ETSI EN 300 132-3 V2.3.1 (2023-01), Power supply interface at the input to ICT equipment; Part 3: Up to 400 V DC, clauses 5.2-5.3"
     url: "https://www.etsi.org/deliver/etsi_en/300100_300199/30013203/02.03.01_60/en_30013203v020301p.pdf"
@@ -130,3 +134,43 @@ network:
     value: null
     source: PENDING
     note: "The IEEE feeder gives no cable ampacity. Currents are reported but not enforced until the EEE spec sets a limit."
+  grid_tie_max_kw:
+    value: 800.0
+    source: PENDING
+    ref: ieee_eulv_2015
+    note: "Placeholder: the benchmark transformer's 0.8 MVA taken as kW. Replace with the EEE grid-tie converter rating."
+
+reward:
+  # reward_i = -cost_i - penalties_i. Every penalty is computed on the
+  # PROPOSED action, before the safety layer blocks it, so agents learn not
+  # to propose unsafe actions. Weights convert a violation into AUD so it is
+  # comparable with the bill; they are tuning parameters, not facts.
+  # Shared terms are given to every agent (the network is a common good).
+  own_voltage_aud_per_v:
+    value: 0.05
+    source: SCENARIO
+    note: "Own node: volts outside [voltage_min_v, voltage_max_v]."
+  network_voltage_aud_per_v:
+    value: 0.01
+    source: SCENARIO
+    note: "Shared: volts outside the band summed over every node."
+  line_overload_aud_per_a:
+    value: 0.01
+    source: SCENARIO
+    note: "Shared: amps above line_current_max_a summed over cables; inactive while that limit is null."
+  grid_overload_aud_per_kw:
+    value: 0.1
+    source: SCENARIO
+    note: "Shared: kW above grid_tie_max_kw in either direction."
+  collapse_aud:
+    value: 1.0
+    source: SCENARIO
+    note: "Shared: the proposed action's power flow does not converge."
+  blocked_aud:
+    value: 0.2
+    source: SCENARIO
+    note: "Shared: the safety layer replaced the proposed action."
+  infeasible_aud_per_kwh:
+    value: 0.01
+    source: SCENARIO
+    note: "Own: requested minus executed battery energy (above the rating, or more than the stored energy or headroom allows). Kept small: clipping is physically harmless."
